@@ -20,7 +20,7 @@ def read_readme(path: str = "README.md") -> tuple[str, str | None]:
     p = Path(path)
     if p.exists():
         return p.read_text(encoding="utf-8"), "text/markdown"
-    return "KDE-based density estimation and approximation package.", None
+    return "Morph-Z for high accuracy marginal likelihood estimation package.", None
 
 
 setup(

@@ -8,8 +8,8 @@ import os
 import tempfile
 import shutil
 
-# Add the src directory to the path so we can import morphZ
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Add the project src directory to the path so we can import morphZ
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from morphZ import KDE_approx, compute_and_save_bandwidths
 
@@ -32,12 +32,13 @@ def test_bandwidth_integration():
             data,
             method="silverman",
             param_names=param_names,
-            output_path=temp_dir
+            output_path=temp_dir,
+            n_order=1
         )
         print(f"   Computed bandwidths: {bw_dict}")
 
         # Check that the JSON file was created
-        json_file = os.path.join(temp_dir, "bw_silverman.json")
+        json_file = os.path.join(temp_dir, "bw_silverman_1D.json")
         assert os.path.exists(json_file), f"JSON file not created: {json_file}"
 
         # Step 2: Load and verify JSON content

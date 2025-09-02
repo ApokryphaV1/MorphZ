@@ -8,8 +8,8 @@ import os
 import tempfile
 import json
 
-# Add the src directory to the path so we can import morphZ
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Add the project src directory to the path so we can import morphZ
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from morphZ import compute_and_save_bandwidths
 
@@ -32,13 +32,14 @@ def test_return_format_matches_json():
             data,
             method="silverman",
             param_names=param_names,
-            output_path=temp_dir
+            output_path=temp_dir,
+            n_order=1
         )
         print(f"   Returned value: {returned_value}")
 
         # Step 2: Load and verify JSON content
         print("\n2. Loading JSON file...")
-        json_file = os.path.join(temp_dir, "bw_silverman.json")
+        json_file = os.path.join(temp_dir, "bw_silverman_1D.json")
         with open(json_file, 'r') as f:
             json_content = json.load(f)
         print(f"   JSON content: {json_content}")
@@ -82,12 +83,13 @@ def test_with_groups():
             param_names=param_names,
             output_path=temp_dir,
             in_path=group_file,
-            group_format="groups"
+            group_format="groups",
+            n_order=2
         )
         print(f"   Returned value: {returned_value}")
 
         # Load JSON
-        json_file = os.path.join(temp_dir, "bw_silverman.json")
+        json_file = os.path.join(temp_dir, "bw_silverman_2D.json")
         with open(json_file, 'r') as f:
             json_content = json.load(f)
         print(f"   JSON content: {json_content}")

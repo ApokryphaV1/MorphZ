@@ -70,7 +70,7 @@ def test_evidence_indep_kde():
                 bridge_start_fraction=0.5,
                 max_iter=1000,
                 tol=1e-3,
-                kde_type="indep",
+                morph_type="indep",
                 param_names=param_names,
                 output_path=temp_dir,
                 n_estimations=1,
@@ -81,11 +81,11 @@ def test_evidence_indep_kde():
             print(f"   Evidence results: {results}")
 
             # Check that bandwidth file was created
-            bw_file = os.path.join(temp_dir, "bw_silverman.json")
+            bw_file = os.path.join(temp_dir, "bw_silverman_1D.json")
             assert os.path.exists(bw_file), "Bandwidth file not created"
 
             # Check that logZ file was created
-            logz_file = os.path.join(temp_dir, "logz_morph_z.txt")
+            logz_file = os.path.join(temp_dir, "logz_morph_z_indep_silverman.txt")
             assert os.path.exists(logz_file), "LogZ file not created"
 
             # Verify results structure
@@ -146,7 +146,7 @@ def test_evidence_pair_kde():
                 bridge_start_fraction=0.5,
                 max_iter=1000,
                 tol=1e-3,
-                kde_type="pair",
+                morph_type="pair",
                 param_names=param_names,
                 output_path=temp_dir,
                 n_estimations=1,
@@ -157,11 +157,11 @@ def test_evidence_pair_kde():
             print(f"   Evidence results: {results}")
 
             # Check that bandwidth file was created
-            bw_file = os.path.join(temp_dir, "bw_silverman.json")
+            bw_file = os.path.join(temp_dir, "bw_silverman_2D.json")
             assert os.path.exists(bw_file), "Bandwidth file not created"
 
             # Check that logZ file was created
-            logz_file = os.path.join(temp_dir, "logz_morph_z.txt")
+            logz_file = os.path.join(temp_dir, "logz_morph_z_pair_silverman.txt")
             assert os.path.exists(logz_file), "LogZ file not created"
 
             logz, error = results[0]
@@ -214,7 +214,7 @@ def test_evidence_tree_kde():
                 bridge_start_fraction=0.5,
                 max_iter=1000,
                 tol=1e-3,
-                kde_type="tree",
+                morph_type="tree",
                 param_names=param_names,
                 output_path=temp_dir,
                 n_estimations=1,
@@ -225,7 +225,7 @@ def test_evidence_tree_kde():
             print(f"   Evidence results: {results}")
 
             # Check that bandwidth file was created
-            bw_file = os.path.join(temp_dir, "bw_silverman.json")
+            bw_file = os.path.join(temp_dir, "bw_silverman_2D.json")
             assert os.path.exists(bw_file), "Bandwidth file not created"
 
             logz, error = results[0]

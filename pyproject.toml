@@ -9,7 +9,7 @@ fallback_version = "0.0.0"
 
 [project]
 name = "morphZ"
-description = "KDE-based density estimation and approximation package."
+description = "Morph-Z for high accuracy marginal likelihood estimation package."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-3-Clause" }

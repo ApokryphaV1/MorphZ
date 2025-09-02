@@ -46,12 +46,13 @@ def test_group_kde_3_elements():
             param_names=param_names,
             output_path=temp_dir,
             in_path=tc_file,
-            group_format="groups"
+            group_format="groups",
+            n_order=3
         )
         print(f"   Computed bandwidths: {bw_dict}")
 
         # Check that the JSON file was created
-        json_file = os.path.join(temp_dir, "bw_silverman.json")
+        json_file = os.path.join(temp_dir, "bw_silverman_3D.json")
         assert os.path.exists(json_file), f"JSON file not created: {json_file}"
 
         # Step 3: Load and verify JSON content
@@ -132,13 +133,14 @@ def test_group_kde_mixed_sizes():
             param_names=param_names,
             output_path=temp_dir,
             in_path=tc_file,
-            group_format="groups"
+            group_format="groups",
+            n_order=3
         )
         print(f"   Computed bandwidths: {bw_dict}")
 
         # Create GroupKDE
         print("\n3. Creating GroupKDE...")
-        json_file = os.path.join(temp_dir, "bw_silverman.json")
+        json_file = os.path.join(temp_dir, "bw_silverman_3D.json")
         kde = GroupKDE(
             data,
             param_tc=tc_file,
