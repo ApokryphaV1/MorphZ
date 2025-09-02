@@ -1,4 +1,4 @@
-## morphZ
+## MorphZ
 
 Morph-Z for high accuracy marginal likelihood estimation and morphological density approximation toolkit for scientific workflows, with utilities for dependency analysis.
 
