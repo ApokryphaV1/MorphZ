@@ -33,7 +33,7 @@ Interactive notebooks live in `examples/`:
 
 ## Quick Starts
 
-Minimal KDE fit and evaluate:
+Minimal Morph fit and evaluate:
 
 ```python
 import numpy as np
@@ -43,10 +43,10 @@ rng = np.random.default_rng(0)
 X = rng.normal(size=(500, 2))
 
 bw = select_bandwidth(X, method="silverman")
-kde = Morph_Indep(X, kde_bw=bw)
+morph_indep = Morph_Indep(X, kde_bw=bw)
 
 pts = rng.normal(size=(5, 2))
-print(kde.logpdf(pts))
+print(morph_indep.logpdf(pts))
 ```
 
 Compute MI heatmap and a Chow–Liu tree (artifacts saved to `out_dir`):
@@ -107,11 +107,11 @@ results = evidence(
 print("log(z), err per run:\n", np.array(results))
 ```
 
-Artifacts will be saved under `examples/morphZ_gaussian_demo/` (bandwidths, MI/Tree files as needed, and `logz_morph_z_<kde>_<bw>.txt`).
+Artifacts will be saved under `examples/morphZ_gaussian_demo/` (bandwidths, MI/Tree files as needed, and `logz_morph_z_<morph_type>_<bw_method>.txt`).
 
 ## API Highlights
 
-- Morphs: `Morph_Indep` (aka `KDE_approx`), `Morph_Pairwise` (aka `PairwiseKDE`), `Morph_Tree` (aka `TreeKDE`), `Morph_Group` (aka `GroupKDE`).
+- Morphs: `Morph_Indep`, `Morph_Pairwise`, `Morph_Tree`, `Morph_Group`.
 - Bandwidths: `select_bandwidth`, `compute_and_save_bandwidths`.
 - Evidence: `evidence`, `bridge_sampling_ln` (lower‑level), `compute_bridge_rmse`.
 - Dependency analysis: `dependency_tree.compute_and_plot_mi_tree`.
