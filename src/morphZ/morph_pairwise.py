@@ -3,6 +3,7 @@ pairwise_kde.py -- greedy pairwise KDE approximation (see module docstring in co
 """
 from __future__ import annotations
 import json
+import os
 from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 from scipy.stats import gaussian_kde
@@ -30,6 +31,7 @@ class Morph_Pairwise(KDEBase):
         verbose: bool = False,
         bw_json_path: str = None,
         bw_method: Union[str, float, Dict[str, float], None] = None,
+        top_k_greedy: int = 1,
     ):
         """
         Initialize and fit pairwise/independent KDE components.
@@ -51,6 +53,11 @@ class Morph_Pairwise(KDEBase):
                 ``compute_and_save_bandwidths(..., n_order=2)``. When provided,
                 speeds up and standardizes bandwidths. You can still override
                 individual parameters via the ``kde_bw`` dict.
+            top_k_greedy (int): Try K seeded greedy runs. Run i in [0..K-1]
+                seeds the selection with the i-th highest MI pair from the
+                sorted candidate list, then completes selection greedily. The
+                run with the largest total MI is kept. Defaults to 1 (current
+                behavior).
 
         Notes:
             - When ``kde_bw`` is a list per pair, the geometric mean is used to
@@ -75,6 +82,7 @@ class Morph_Pairwise(KDEBase):
         self.kde_bw = kde_bw
         self.min_mi = min_mi
         self.bw_json_path = bw_json_path
+        self.top_k_greedy = int(top_k_greedy) if top_k_greedy is not None else 1
         if param_names is None:
             param_names = [f"param_{i}" for i in range(self.n_params)]
         if len(param_names) != self.n_params:
@@ -118,18 +126,74 @@ class Morph_Pairwise(KDEBase):
         if self.min_mi is not None:
             canonical = [t for t in canonical if t[2] >= self.min_mi]
         canonical.sort(key=lambda t: -t[2])
-        pool = set(self.param_names)
-        self.pairs = []
-        for na, nb, mi in canonical:
-            if na in pool and nb in pool:
-                self.pairs.append((na, nb, mi))
-                pool.remove(na); pool.remove(nb)
-                if self.verbose:
+
+        # Helper to run one seeded greedy pass starting from seed_idx
+        def _run_seed(seed_idx: int):
+            pool = set(self.param_names)
+            selection = []
+            total = 0.0
+            if 0 <= seed_idx < len(canonical):
+                na, nb, mi = canonical[seed_idx]
+                if na in pool and nb in pool:
+                    selection.append((na, nb, mi))
+                    pool.remove(na); pool.remove(nb)
+                    total += float(mi)
+            for na, nb, mi in canonical:
+                if na in pool and nb in pool:
+                    selection.append((na, nb, mi))
+                    pool.remove(na); pool.remove(nb)
+                    total += float(mi)
+            singles = sorted(pool)
+            return selection, singles, total
+
+        # Best-of-K seeded greedy
+        if self.top_k_greedy is None or self.top_k_greedy <= 1 or len(canonical) == 0:
+            pool = set(self.param_names)
+            self.pairs = []
+            for na, nb, mi in canonical:
+                if na in pool and nb in pool:
+                    self.pairs.append((na, nb, mi))
+                    pool.remove(na); pool.remove(nb)
+                    if self.verbose:
+                        print(f"Selected pair: {na}, {nb} (MI={mi:.4g})")
+            self.singles = sorted(pool)
+            if self.verbose:
+                print(f"Pairs selected ({len(self.pairs)}): {self.pairs}")
+                print(f"Singles ({len(self.singles)}): {self.singles}")
+        else:
+            K = min(int(self.top_k_greedy), len(canonical))
+            best_pairs, best_singles = [], self.param_names[:]  # placeholders
+            best_key = None  # (total_mi, n_pairs, -seed_idx) for max-compare
+            for seed_idx in range(K):
+                pairs_i, singles_i, total_i = _run_seed(seed_idx)
+                key = (total_i, len(pairs_i), -seed_idx)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_pairs, best_singles = pairs_i, singles_i
+            self.pairs, self.singles = best_pairs, best_singles
+            if self.verbose:
+                total_best = best_key[0] if best_key is not None else 0.0
+                print(f"Best-of-{K} seeded greedy total MI: {total_best:.4g}; pairs={len(self.pairs)}")
+                for na, nb, mi in self.pairs:
                     print(f"Selected pair: {na}, {nb} (MI={mi:.4g})")
-        self.singles = sorted(pool)
-        if self.verbose:
-            print(f"Pairs selected ({len(self.pairs)}): {self.pairs}")
-            print(f"Singles ({len(self.singles)}): {self.singles}")
+                print(f"Singles ({len(self.singles)}): {self.singles}")
+        # Save selection next to source MI JSON if available
+        try:
+            if isinstance(param_mi, str):
+                out_dir = os.path.dirname(os.path.abspath(param_mi))
+                out_path = os.path.join(out_dir, "selected_pairs.json")
+                payload = {
+                    "pairs": [{"names": [a, b], "mi": float(mi)} for (a, b, mi) in getattr(self, "pairs", [])],
+                    "singles": list(getattr(self, "singles", [])),
+                }
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2)
+                if self.verbose:
+                    print(f"Saved selection to {out_path}")
+        except Exception as e:  # pragma: no cover
+            if self.verbose:
+                print(f"Warning: failed to write selected_pairs.json: {e}")
+
         self._fit_kdes()
 
     def _fit_kdes(self):

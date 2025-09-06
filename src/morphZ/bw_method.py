@@ -434,6 +434,7 @@ def compute_and_save_bandwidths(
     n_order: int,
     in_path: str | None = None,
     group_format: Literal["pairs", "groups"] = "pairs",
+    top_k_greedy: int = 1,
     
 ) -> list[list[Union[str, float]]]:
     """
@@ -444,6 +445,24 @@ def compute_and_save_bandwidths(
     that can be passed to `gaussian_kde.set_bandwidth(factor)` for subsequent
     evaluations. For diagonal/group-per-dimension exact control consider
     returning per-dim h_j and applying them with a custom KDE wrapper.
+    
+    Parameters
+    ----------
+    data : (n_samples, n_features)
+    method : {'scott','silverman','isj','cv_iso','cv_diag'}
+    param_names : list[str]
+    output_path : str
+    n_order : int
+        Group order (2 for pairs, k for k-groups) used only for output filename.
+    in_path : str | None
+        Optional path to MI/TC JSON (pairs or groups). When provided, groups
+        are selected greedily from this candidate list.
+    group_format : {'pairs','groups'}
+        Format of `in_path` entries.
+    top_k_greedy : int
+        Run K seeded greedy selections starting from each of the top-K
+        candidates (by MI or TC), then keep the selection with the largest
+        total score. Default 1 (single greedy pass).
     """
     X = _to_2d(data)
     n_samples, n_features = X.shape
@@ -498,19 +517,55 @@ def compute_and_save_bandwidths(
             canonical.append((named_group, float(tc)))
 
         canonical.sort(key=lambda t: -t[1])
-        pool = set(param_names)
-        for group_names, tc in canonical:
-            if all(name in pool for name in group_names):
-                selected_groups.append({"names": group_names, "tc": tc})
-                for name in group_names:
-                    pool.remove(name)
-        singles = sorted(pool)
+
+        # Seeded greedy selection aligned with Morph_Pairwise/Morph_Group
+        def _run_seed(seed_idx: int):
+            pool = set(param_names)
+            selection = []
+            total = 0.0
+            if 0 <= seed_idx < len(canonical):
+                names, val = canonical[seed_idx]
+                if all(name in pool for name in names):
+                    selection.append({"names": names, "tc": float(val)})
+                    for n in names:
+                        pool.remove(n)
+                    total += float(val)
+            for names, val in canonical:
+                if all(name in pool for name in names):
+                    selection.append({"names": names, "tc": float(val)})
+                    for n in names:
+                        pool.remove(n)
+                    total += float(val)
+            return selection, sorted(pool), total
+
+        if top_k_greedy is None or top_k_greedy <= 1 or len(canonical) == 0:
+            pool = set(param_names)
+            for names, val in canonical:
+                if all(name in pool for name in names):
+                    selected_groups.append({"names": names, "tc": float(val)})
+                    for n in names:
+                        pool.remove(n)
+            singles = sorted(pool)
+        else:
+            K = min(int(top_k_greedy), len(canonical))
+            best_sel, best_singles = [], param_names[:]  # placeholders
+            best_key = None  # (total, n_groups, -seed_idx)
+            for seed_idx in range(K):
+                sel_i, singles_i, total_i = _run_seed(seed_idx)
+                key = (total_i, len(sel_i), -seed_idx)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_sel, best_singles = sel_i, singles_i
+            selected_groups, singles = best_sel, best_singles
     
 
+    # Compute factors and build structured payload mirroring selected_* files
     bandwidths: dict[str, float] = {}
-    # compute groups -> scalar factors
+    groups_out: list[dict] = []
+
+    # groups/pairs factors
     for group_info in selected_groups:
-        group_names = group_info["names"]
+        group_names = list(group_info["names"])
         indices = [param_names.index(n) for n in group_names]
         group_data = X[:, indices]
 
@@ -523,16 +578,17 @@ def compute_and_save_bandwidths(
         elif method == "cv_iso":
             joint_factor = float(cross_validation_bandwidth(group_data, kind="isotropic"))
         elif method == "cv_diag":
-            # diagonal cv -> convert h_j to factor
             fac = cross_validation_bandwidth(group_data, kind="diagonal")
             joint_factor = float(fac)
         else:
             raise ValueError("Unsupported method for groups")
 
+        groups_out.append({"names": group_names, "bw": float(joint_factor)})
         for name in group_names:
             bandwidths[name] = float(joint_factor)
 
-    # compute singles
+    # singles factors
+    singles_out: list[dict] = []
     for param_name in singles:
         param_idx = param_names.index(param_name)
         param_data = X[:, param_idx]
@@ -550,31 +606,31 @@ def compute_and_save_bandwidths(
         else:
             raise ValueError("Unsupported method")
 
+        singles_out.append({"name": param_name, "bw": float(bw)})
         bandwidths[param_name] = float(bw)
-    
-    
 
-    # # group parameters by bandwidth for simplified output
-    bw_groups: dict[float, list[str]] = defaultdict(list)
-    for pname, bwval in bandwidths.items():
-        key = float(round(float(bwval), 12))
-        bw_groups[key].append(pname)
-
-
-    simplified_output: list[list[Union[str, float]]] = []
-    for bwval, names in bw_groups.items():
-        simplified_output.append(sorted(names) + [float(bwval)])
+    # Assemble payload: use 'pairs' when n_order==2 and group_format=='pairs'; else 'groups'
+    top_key = "pairs" if (n_order == 2 and group_format == "pairs") else "groups"
+    payload = {
+        top_key: groups_out,
+        "singles": singles_out,
+    }
+    if top_key == "groups":
+        payload["n_order"] = int(n_order)
 
     os.makedirs(output_path, exist_ok=True)
     output_filename = os.path.join(output_path, f"bw_{method}_{n_order}D.json")
+    # Serialize first to avoid partial file on error
+    content = json.dumps(payload, indent=2)
     with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(simplified_output, f, indent=4)
+        f.write(content)
 
     print(f"Bandwidths saved to {output_filename}")
     if in_path is not None:
-        print(f"Processed {len(selected_groups)} groups and {len(singles)} single parameters")
+        print(f"Processed {len(selected_groups)} {top_key} and {len(singles)} single parameters")
 
-    return simplified_output
+    # Return bandwidth mapping for optional immediate use (used as overrides)
+    return bandwidths
 
 
 # quick smoke test when run as script

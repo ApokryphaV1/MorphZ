@@ -34,28 +34,56 @@ class KDEBase:
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        # The JSON file now contains the grouped format directly
+        # The JSON file may be one of the following formats:
+        # 1) Grouped list format (legacy from earlier versions):
+        #    [["p1","p2", factor], ["p3", factor], ...]
+        # 2) Structured dict format mirroring selected_pairs/groups files:
+        #    {"pairs"|"groups": [{"names":[...], "factor": f}],
+        #     "singles": [{"name": "p", "factor": f}]}
+        # 3) Legacy dict mapping param->factor or {"bandwidths": {...}}
         if isinstance(data, list):
             bandwidths = {}
             for group in data:
                 if not isinstance(group, list) or len(group) < 2:
                     continue
-                # Last element is the bandwidth value, rest are parameter names
                 param_names = group[:-1]
                 bw_value = group[-1]
-                # Apply the same bandwidth to all parameters in this group
                 for param_name in param_names:
                     if isinstance(param_name, str):
                         bandwidths[param_name] = float(bw_value)
             return bandwidths
 
-        # Handle legacy dictionary format for backward compatibility
-        elif isinstance(data, dict):
-            if "bandwidths" in data:
-                return data["bandwidths"]
-            else:
-                # Assume the whole dict contains parameter->bandwidth mappings
-                return data
+        if isinstance(data, dict):
+            # Structured dict with pairs/groups and singles
+            out: Dict[str, float] = {}
+            if "pairs" in data or "groups" in data:
+                items = data.get("pairs", []) + data.get("groups", [])
+                for item in items:
+                    names = item.get("names") if isinstance(item, dict) else None
+                    fac = None
+                    if isinstance(item, dict):
+                        # prefer 'bw'; fallback to 'factor' for backward compatibility
+                        fac = item.get("bw", item.get("factor"))
+                    if isinstance(names, (list, tuple)) and fac is not None:
+                        for n in names:
+                            if isinstance(n, str):
+                                out[n] = float(fac)
+                singles = data.get("singles", [])
+                for s in singles:
+                    if isinstance(s, dict):
+                        name = s.get("name")
+                        fac = s.get("bw", s.get("factor"))
+                        if isinstance(name, str) and fac is not None:
+                            out[name] = float(fac)
+                if out:
+                    return out
+            # Legacy dictionary formats
+            if "bandwidths" in data and isinstance(data["bandwidths"], dict):
+                return {str(k): float(v) for k, v in data["bandwidths"].items()}
+            # Assume direct param->factor mapping
+            if all(isinstance(v, (int, float)) for v in data.values()):
+                return {str(k): float(v) for k, v in data.items()}
+            raise ValueError(f"Invalid JSON structure in {json_path}. Unsupported dict layout.")
 
         else:
             raise ValueError(f"Invalid JSON structure in {json_path}. Expected list or dict format.")

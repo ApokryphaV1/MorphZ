@@ -3,6 +3,8 @@ morph_group.py -- greedy group-based KDE approximation.
 """
 from __future__ import annotations
 import json
+import os
+import re
 from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 from scipy.stats import gaussian_kde
@@ -28,6 +30,7 @@ class Morph_Group(KDEBase):
         verbose: bool = False,
         bw_json_path: str = None,
         bw_method: Union[str, float, Dict[str, float], None] = None,
+        top_k_greedy: int = 1,
     ):
         """
         Initialize and fit group/independent KDE components.
@@ -43,6 +46,11 @@ class Morph_Group(KDEBase):
             verbose (bool): Print helpful fitting logs.
             bw_json_path (str | None): Path to bandwidth JSON (e.g., produced by
                 ``compute_and_save_bandwidths(..., n_order=k, group_format="groups")``).
+            top_k_greedy (int): Try K seeded greedy runs. Run i in [0..K-1]
+                seeds the selection with the i-th highest‑TC group from the
+                sorted candidate list, then completes selection greedily. The
+                run with the largest total TC is kept. Defaults to 1 (current
+                behavior).
 
         Notes:
             - For group KDEs (dim>1), a single scalar bandwidth is required by
@@ -67,6 +75,7 @@ class Morph_Group(KDEBase):
         self.kde_bw = kde_bw
         self.min_tc = min_tc
         self.bw_json_path = bw_json_path
+        self.top_k_greedy = int(top_k_greedy) if top_k_greedy is not None else 1
         if param_names is None:
             param_names = [f"param_{i}" for i in range(self.n_params)]
         if len(param_names) != self.n_params:
@@ -118,21 +127,92 @@ class Morph_Group(KDEBase):
             canonical = [g for g in canonical if g[1] >= self.min_tc]
         
         canonical.sort(key=lambda t: -t[1])
-        
-        pool = set(self.param_names)
-        self.groups = []
-        for group_names, tc in canonical:
-            if all(name in pool for name in group_names):
-                self.groups.append({"names": group_names, "tc": tc})
-                for name in group_names:
-                    pool.remove(name)
-                if self.verbose:
-                    print(f"Selected group: {', '.join(group_names)} (TC={tc:.4g})")
 
-        self.singles = sorted(pool)
-        if self.verbose:
-            print(f"Groups selected ({len(self.groups)}): {[g['names'] for g in self.groups]}")
-            print(f"Singles ({len(self.singles)}): {self.singles}")
+        # Helper to run one seeded greedy pass starting from seed_idx
+        def _run_seed(seed_idx: int):
+            pool = set(self.param_names)
+            selection = []  # list of dicts with {names, tc}
+            total = 0.0
+            if 0 <= seed_idx < len(canonical):
+                names, tc = canonical[seed_idx]
+                if all(name in pool for name in names):
+                    selection.append({"names": names, "tc": float(tc)})
+                    for n in names:
+                        pool.remove(n)
+                    total += float(tc)
+            for names, tc in canonical:
+                if all(name in pool for name in names):
+                    selection.append({"names": names, "tc": float(tc)})
+                    for n in names:
+                        pool.remove(n)
+                    total += float(tc)
+            singles = sorted(pool)
+            return selection, singles, total
+
+        # Best-of-K seeded greedy
+        if self.top_k_greedy is None or self.top_k_greedy <= 1 or len(canonical) == 0:
+            pool = set(self.param_names)
+            self.groups = []
+            for names, tc in canonical:
+                if all(name in pool for name in names):
+                    self.groups.append({"names": names, "tc": tc})
+                    for name in names:
+                        pool.remove(name)
+                    if self.verbose:
+                        print(f"Selected group: {', '.join(names)} (TC={tc:.4g})")
+
+            self.singles = sorted(pool)
+            if self.verbose:
+                print(f"Groups selected ({len(self.groups)}): {[g['names'] for g in self.groups]}")
+                print(f"Singles ({len(self.singles)}): {self.singles}")
+        else:
+            K = min(int(self.top_k_greedy), len(canonical))
+            best_groups, best_singles = [], self.param_names[:]  # placeholders
+            best_key = None  # (total_tc, n_groups, -seed_idx) for max-compare
+            for seed_idx in range(K):
+                groups_i, singles_i, total_i = _run_seed(seed_idx)
+                key = (total_i, len(groups_i), -seed_idx)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_groups, best_singles = groups_i, singles_i
+            self.groups, self.singles = best_groups, best_singles
+            if self.verbose:
+                total_best = best_key[0] if best_key is not None else 0.0
+                print(f"Best-of-{K} seeded greedy total TC: {total_best:.4g}; groups={len(self.groups)}")
+                for g in self.groups:
+                    print(f"Selected group: {', '.join(g['names'])} (TC={g['tc']:.4g})")
+                print(f"Singles ({len(self.singles)}): {self.singles}")
+        # Save selection next to source TC JSON if available
+        try:
+            if isinstance(param_tc, str):
+                out_dir = os.path.dirname(os.path.abspath(param_tc))
+                # Try to extract n_order from filename like params_3-order_TC.json
+                base = os.path.basename(param_tc)
+                m = re.search(r"params_(\d+)-order_TC\.json$", base)
+                if m:
+                    n_order_str = m.group(1)
+                    out_name = f"selected_{n_order_str}-order_group.json"
+                else:
+                    out_name = "selected_group.json"
+                out_path = os.path.join(out_dir, out_name)
+                payload = {
+                    "groups": [
+                        {"names": list(g.get("names", ())), "tc": float(g.get("tc", 0.0))}
+                        for g in getattr(self, "groups", [])
+                    ],
+                    "singles": list(getattr(self, "singles", [])),
+                }
+                # Include n_order when discoverable
+                if m:
+                    payload["n_order"] = int(m.group(1))
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2)
+                if self.verbose:
+                    print(f"Saved selection to {out_path}")
+        except Exception as e:  # pragma: no cover
+            if self.verbose:
+                print(f"Warning: failed to write selected group file: {e}")
+
         self._fit_kdes()
 
     def _fit_kdes(self):

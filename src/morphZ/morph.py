@@ -56,6 +56,7 @@ def evidence(
     n_estimations: int = 1,
     kde_bw: Optional[Union[BandwidthMethod, float, Dict[str, float]]] = None,
     verbose: bool = False,
+    top_k_greedy: int = None,
 ) -> List[List[float]]:
     """
     Compute log evidence using morphological bridge sampling with KDE proposals.
@@ -103,6 +104,10 @@ def evidence(
             or a ``{name: value}`` dict to override specific parameters when
             using ``bw_json_path``.
         verbose (bool): Print fitting details for KDE components.
+        top_k_greedy (int): For ``pair`` and ``*_group`` morph types, run K
+            seeded greedy selections starting from each of the top‑K candidates
+            (by MI or TC), and keep the selection with the highest total score.
+            Default is 1 (single greedy pass as before).
 
     Returns:
         list[[float, float]]: A list of ``[logz, err]`` for each estimation.
@@ -114,6 +119,8 @@ def evidence(
           fits, or ``'isj'`` as a robust nonparametric choice.
         - Use ``n_estimations>=3`` to assess stability and report mean/SE.
     """
+
+    
     kde_bw_name = kde_bw
     samples = post_samples[::thin, :]
     log_prob = log_posterior_values[::thin]
@@ -135,11 +142,23 @@ def evidence(
     # Detect numeric bandwidths; if numeric, skip bw_method/JSON logic and pass directly
     bw_is_numeric = isinstance(kde_bw, (float, int, np.floating))
     
+    if top_k_greedy is None:
+        from math import comb
+        if morph_type == "pair":
+            top_k_greedy = comb(ndim, 2)
+            if verbose:
+             print(f"Setting top_k_greedy to {top_k_greedy} for pairs selection.")
+        elif "group" in morph_type:
+            n_order = int(morph_type.split("_")[0])
+            top_k_greedy = int(np.sqrt(comb(ndim, n_order))) # sqrt of number of possible groups
+            if verbose:
+                print(f"Setting top_k_greedy to {top_k_greedy} for {n_order}-groups selection.")
+
+    if param_names is None:
+                param_names = [f'param_{i}' for i in range(ndim)]
 
     if morph_type == "indep":
         print("\nUsing independent KDE for proposal distribution.")
-        if param_names is None:
-                param_names = [f'param_{i}' for i in range(ndim)]
         if bw_is_numeric:
             if verbose:
                 print(f"\nKDE bandwidth method: {kde_bw} (numeric: {bw_is_numeric})")
@@ -168,7 +187,29 @@ def evidence(
 
         if bw_is_numeric:
             # Direct numeric bandwidth; skip JSON computation
-            target_kde = Morph_Pairwise(kde_samples, param_mi=mi_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=None)
+            target_kde = Morph_Pairwise(
+                kde_samples,
+                param_mi=mi_file,
+                param_names=param_names,
+                kde_bw=kde_bw,
+                verbose=verbose,
+                bw_json_path=None,
+                top_k_greedy=top_k_greedy,
+            )
+            # Save selected pairs/singles
+            try:
+                selected_pairs_path = os.path.join(output_path, "selected_pairs.json")
+                sel = {
+                    "pairs": [{"names": [a, b], "mi": float(mi)} for (a, b, mi) in getattr(target_kde, "pairs", [])],
+                    "singles": list(getattr(target_kde, "singles", [])),
+                }
+                # Build JSON string first to avoid truncating file on failure
+                content = json.dumps(sel, indent=2)
+                with open(selected_pairs_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:  # pragma: no cover
+                if verbose:
+                    print(f"Warning: failed to write selected_pairs.json: {e}")
         else:
             method_name = kde_bw  # Store original method name
 
@@ -176,9 +217,39 @@ def evidence(
             
             if not os.path.exists(bw_json_path):
                 print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
-                kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names, output_path=output_path,n_order=2, in_path=mi_file)
+                kde_bw = compute_and_save_bandwidths(
+                    kde_samples,
+                    method=method_name,
+                    param_names=param_names,
+                    output_path=output_path,
+                    n_order=2,
+                    in_path=mi_file,
+                    group_format="pairs",
+                    top_k_greedy=top_k_greedy,
+                )
             # Pass the JSON path to KDE class for automatic bandwidth loading
-            target_kde = Morph_Pairwise(kde_samples, param_mi=mi_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=bw_json_path)
+            target_kde = Morph_Pairwise(
+                kde_samples,
+                param_mi=mi_file,
+                param_names=param_names,
+                kde_bw=kde_bw,
+                verbose=verbose,
+                bw_json_path=bw_json_path,
+                top_k_greedy=top_k_greedy,
+            )
+            # Save selected pairs/singles
+            try:
+                selected_pairs_path = os.path.join(output_path, "selected_pairs.json")
+                sel = {
+                    "pairs": [{"names": [a, b], "mi": float(mi)} for (a, b, mi) in getattr(target_kde, "pairs", [])],
+                    "singles": list(getattr(target_kde, "singles", [])),
+                }
+                content = json.dumps(sel, indent=2)
+                with open(selected_pairs_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:  # pragma: no cover
+                if verbose:
+                    print(f"Warning: failed to write selected_pairs.json: {e}")
         log_proposal_pdf = target_kde.logpdf
 
     elif "group" in morph_type:
@@ -199,16 +270,69 @@ def evidence(
         if bw_is_numeric:
             if verbose:
                 print(f"\nKDE bandwidth method: {kde_bw} (numeric: {bw_is_numeric})")
-            target_kde = Morph_Group(kde_samples, group_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=None)
+            target_kde = Morph_Group(
+                kde_samples,
+                group_file,
+                param_names=param_names,
+                kde_bw=kde_bw,
+                verbose=verbose,
+                bw_json_path=None,
+                top_k_greedy=top_k_greedy,
+            )
+            # Save selected groups/singles
+            try:
+                selected_group_path = os.path.join(output_path, f"selected_{n_order}-order_group.json")
+                sel = {
+                    "groups": [{"names": list(g.get("names", ())), "tc": float(g.get("tc", 0.0))} for g in getattr(target_kde, "groups", [])],
+                    "singles": list(getattr(target_kde, "singles", [])),
+                    "n_order": int(n_order),
+                }
+                content = json.dumps(sel, indent=2)
+                with open(selected_group_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:  # pragma: no cover
+                if verbose:
+                    print(f"Warning: failed to write selected_{n_order}-order_group.json: {e}")
         else:
             method_name = kde_bw  # Store original method name
             bw_json_path= f"{output_path}/bw_{method_name}_{n_order}D.json"
 
             if not os.path.exists(bw_json_path):
                 print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
-                kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names,n_order=n_order, output_path=output_path, in_path=group_file,group_format="groups")
+                kde_bw = compute_and_save_bandwidths(
+                    kde_samples,
+                    method=method_name,
+                    param_names=param_names,
+                    n_order=n_order,
+                    output_path=output_path,
+                    in_path=group_file,
+                    group_format="groups",
+                    top_k_greedy=top_k_greedy,
+                )
 
-            target_kde = Morph_Group(kde_samples, group_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=bw_json_path)
+            target_kde = Morph_Group(
+                kde_samples,
+                group_file,
+                param_names=param_names,
+                kde_bw=kde_bw,
+                verbose=verbose,
+                bw_json_path=bw_json_path,
+                top_k_greedy=top_k_greedy,
+            )
+            # Save selected groups/singles
+            try:
+                selected_group_path = os.path.join(output_path, f"selected_{n_order}-order_group.json")
+                sel = {
+                    "groups": [{"names": list(g.get("names", ())), "tc": float(g.get("tc", 0.0))} for g in getattr(target_kde, "groups", [])],
+                    "singles": list(getattr(target_kde, "singles", [])),
+                    "n_order": int(n_order),
+                }
+                content = json.dumps(sel, indent=2)
+                with open(selected_group_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:  # pragma: no cover
+                if verbose:
+                    print(f"Warning: failed to write selected_{n_order}-order_group.json: {e}")
         log_proposal_pdf = target_kde.logpdf
 
     elif morph_type == "tree":

@@ -1,7 +1,0 @@
-matplotlib
-networkx
-numpy
-scipy
-emcee
-statsmodels
-scikit-learn
