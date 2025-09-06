@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 # Write a version file so runtime __version__ works without importlib.metadata
 write_to = "src/morphZ/_version.py"
 fallback_version = "0.0.0"
+# Avoid local version segments like "+g<sha>" which TestPyPI/PyPI reject
+local_scheme = "no-local-version"
 
 [project]
 name = "morphZ"
@@ -35,6 +37,11 @@ dependencies = [
   "scikit-learn",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/ApokryphaV1/MorphZ.git"
+Homepage = "https://github.com/ApokryphaV1/MorphZ"
+Issues = "https://github.com/ApokryphaV1/MorphZ/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
