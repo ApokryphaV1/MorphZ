@@ -1,16 +1,14 @@
-name: Publish to TestPyPI on push
+name: Publish to TestPyPI on tag
 
 on:
   push:
-    branches: [ main, master ]
+    tags: [ 'v*' ]
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # allow OIDC if you enable Trusted Publishing
-    environment: testpypi
     steps:
       - name: Checkout (fetch full history for SCM)
         uses: actions/checkout@v4
@@ -33,9 +31,28 @@ jobs:
       - name: Check metadata
         run: twine check dist/*
 
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  publish-testpypi:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: testpypi
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # If you configure Trusted Publishing for TestPyPI, you can remove 'password'
           repository-url: https://test.pypi.org/legacy/
-          # OIDC/Trusted Publishing: no password needed
+          skip-existing: true
