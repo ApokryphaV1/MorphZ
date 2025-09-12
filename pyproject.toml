@@ -36,6 +36,12 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+dev = [
+  "jupyter-book"
+]
+
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
