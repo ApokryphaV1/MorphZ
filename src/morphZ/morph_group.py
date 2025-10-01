@@ -7,6 +7,7 @@ from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 from scipy.stats import gaussian_kde
 from .kde_base import KDEBase
+from .logger import logger
 
 
 class Morph_Group(KDEBase):
@@ -127,12 +128,20 @@ class Morph_Group(KDEBase):
                 for name in group_names:
                     pool.remove(name)
                 if self.verbose:
-                    print(f"Selected group: {', '.join(group_names)} (TC={tc:.4g})")
+                    logger.info(
+                        "Selected group: {} (TC={:.4g})",
+                        ", ".join(group_names),
+                        tc,
+                    )
 
         self.singles = sorted(pool)
         if self.verbose:
-            print(f"Groups selected ({len(self.groups)}): {[g['names'] for g in self.groups]}")
-            print(f"Singles ({len(self.singles)}): {self.singles}")
+            logger.info(
+                "Groups selected ({}): {}",
+                len(self.groups),
+                [g["names"] for g in self.groups],
+            )
+            logger.info("Singles ({}): {}", len(self.singles), self.singles)
         self._fit_kdes()
 
     def _fit_kdes(self):
@@ -161,7 +170,7 @@ class Morph_Group(KDEBase):
                 # String method like 'silverman' or 'scott'
                 bw_scalar = bw
             if self.verbose:
-                print(f"approx kde for group{names} with bw: {bw_scalar}")
+                logger.info("approx kde for group{} with bw: {}", names, bw_scalar)
             kde = gaussian_kde(arr, bw_method=bw_scalar)
             self.group_kdes.append({"names": names, "indices": indices, "tc": group_info["tc"], "kde": kde})
 
@@ -180,7 +189,7 @@ class Morph_Group(KDEBase):
             else:
                 bw_scalar = bw
             if self.verbose:
-                print(f"approx kde for singles{name} with bw: {bw_scalar}")
+                logger.info("approx kde for singles{} with bw: {}", name, bw_scalar)
             kde1 = gaussian_kde(arr, bw_method=bw_scalar)
             self.single_kdes[name] = {"index": i, "kde": kde1}
 

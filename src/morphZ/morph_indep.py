@@ -2,6 +2,7 @@ import numpy as np
 from scipy.stats import gaussian_kde
 from typing import Union, Dict, Any
 from .kde_base import KDEBase
+from .logger import logger
 
 
 class Morph_Indep(KDEBase):
@@ -68,7 +69,7 @@ class Morph_Indep(KDEBase):
             # Determine the bandwidth for the current parameter using improved logic
             bw = self._get_bandwidth_for_params([name], bandwidth_dict, kde_bw)
             if self.verbose:
-                print(f"morph_indep for {name} with bw:{bw}")
+                logger.info("morph_indep for {} with bw:{}", name, bw)
             # Fit a Gaussian KDE
             kde_obj = gaussian_kde(param_data, bw_method=bw)
             # Save the callable KDE object in the dictionary

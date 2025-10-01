@@ -7,6 +7,7 @@ from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 from scipy.stats import gaussian_kde
 from .kde_base import KDEBase
+from .logger import logger
 
 
 class Morph_Pairwise(KDEBase):
@@ -125,11 +126,16 @@ class Morph_Pairwise(KDEBase):
                 self.pairs.append((na, nb, mi))
                 pool.remove(na); pool.remove(nb)
                 if self.verbose:
-                    print(f"Selected pair: {na}, {nb} (MI={mi:.4g})")
+                    logger.info(
+                        "Selected pair: {}, {} (MI={:.4g})",
+                        na,
+                        nb,
+                        mi,
+                    )
         self.singles = sorted(pool)
         if self.verbose:
-            print(f"Pairs selected ({len(self.pairs)}): {self.pairs}")
-            print(f"Singles ({len(self.singles)}): {self.singles}")
+            logger.info("Pairs selected ({}): {}", len(self.pairs), self.pairs)
+            logger.info("Singles ({}): {}", len(self.singles), self.singles)
         self._fit_kdes()
 
     def _fit_kdes(self):
@@ -157,7 +163,7 @@ class Morph_Pairwise(KDEBase):
                 # String method like 'silverman' or 'scott'
                 bw_scalar = bw
             if self.verbose:
-                print(f"approx kde for pair{[na, nb]} with bw: {bw_scalar}")
+                logger.info("approx kde for pair{} with bw: {}", [na, nb], bw_scalar)
             kde2 = gaussian_kde(arr, bw_method=bw_scalar)
             self.pair_kdes.append({"names": (na, nb), "indices": (i, j), "mi": mi, "kde": kde2})
 

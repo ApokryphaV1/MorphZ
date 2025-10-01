@@ -27,6 +27,7 @@ from .morph_group import Morph_Group
 from . import Nth_TC
 from .bw_method import compute_and_save_bandwidths
 from .bridge import bridge_sampling_ln, compute_bridge_rmse
+from .logger import logger
 
 # ----- Typing helpers for better IDE hovers -----
 # Bandwidth methods supported by bw_method.py
@@ -137,12 +138,16 @@ def evidence(
     
 
     if morph_type == "indep":
-        print("\nUsing independent KDE for proposal distribution.")
+        logger.info("\nUsing independent KDE for proposal distribution.")
         if param_names is None:
                 param_names = [f'param_{i}' for i in range(ndim)]
         if bw_is_numeric:
             if verbose:
-                print(f"\nKDE bandwidth method: {kde_bw} (numeric: {bw_is_numeric})")
+                logger.info(
+                    "\nKDE bandwidth method: {} (numeric: {})",
+                    kde_bw,
+                    bw_is_numeric,
+                )
             # Pass numeric bandwidth directly; do not compute or load JSON
             target_kde = Morph_Indep(kde_samples, kde_bw=kde_bw, param_names=param_names, verbose=verbose, bw_json_path=None)
         else:
@@ -150,20 +155,27 @@ def evidence(
             bw_json_path= f"{output_path}/bw_{method_name}_1D.json"
 
             if not os.path.exists(bw_json_path):
-                print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
+                logger.info(
+                    "BW file not found at {}. Running Bw with {}...",
+                    bw_json_path,
+                    method_name,
+                )
 
                 kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names,n_order=1, output_path=output_path)
             target_kde = Morph_Indep(kde_samples, kde_bw=kde_bw, param_names=param_names,verbose=verbose, bw_json_path=bw_json_path)
         log_proposal_pdf = target_kde.logpdf_kde
 
     elif morph_type == "pair":
-        print("\nUsing Morph_Pairwise for proposal distribution.")
+        logger.info("\nUsing Morph_Pairwise for proposal distribution.")
         mi_file = f"{output_path}/params_MI.json"
         if param_names is None:
                 param_names = [f'param_{i}' for i in range(ndim)]
 
         if not os.path.exists(mi_file):
-            print(f"MI file not found at {mi_file}. Running dependency tree computation...")
+            logger.info(
+                "MI file not found at {}. Running dependency tree computation...",
+                mi_file,
+            )
             dependency_tree.compute_and_plot_mi_tree(samples, names=param_names, out_path=output_path, morph_type="pair")
 
         if bw_is_numeric:
@@ -175,20 +187,27 @@ def evidence(
             bw_json_path= f"{output_path}/bw_{method_name}_2D.json"
             
             if not os.path.exists(bw_json_path):
-                print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
+                logger.info(
+                    "BW file not found at {}. Running Bw with {}...",
+                    bw_json_path,
+                    method_name,
+                )
                 kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names, output_path=output_path,n_order=2, in_path=mi_file)
             # Pass the JSON path to KDE class for automatic bandwidth loading
             target_kde = Morph_Pairwise(kde_samples, param_mi=mi_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=bw_json_path)
         log_proposal_pdf = target_kde.logpdf
 
     elif "group" in morph_type:
-        print("\nUsing Morph_Group for proposal distribution.")
+        logger.info("\nUsing Morph_Group for proposal distribution.")
         n_order = int(morph_type.split("_")[0])
         group_file = f"{output_path}/params_{n_order}-order_TC.json"
         if param_names is None:
                 param_names = [f'param_{i}' for i in range(ndim)]
         if not os.path.exists(group_file):
-            print(f"Group file not found at {group_file}. Running total correlation computation...")
+            logger.info(
+                "Group file not found at {}. Running total correlation computation...",
+                group_file,
+            )
 
             Nth_TC.compute_and_save_tc(samples,names=param_names,n_order=n_order,out_path=output_path)
 
@@ -198,27 +217,37 @@ def evidence(
             group_data = json.load(f)
         if bw_is_numeric:
             if verbose:
-                print(f"\nKDE bandwidth method: {kde_bw} (numeric: {bw_is_numeric})")
+                logger.info(
+                    "\nKDE bandwidth method: {} (numeric: {})",
+                    kde_bw,
+                    bw_is_numeric,
+                )
             target_kde = Morph_Group(kde_samples, group_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=None)
         else:
             method_name = kde_bw  # Store original method name
             bw_json_path= f"{output_path}/bw_{method_name}_{n_order}D.json"
 
             if not os.path.exists(bw_json_path):
-                print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
+                logger.info(
+                    "BW file not found at {}. Running Bw with {}...",
+                    bw_json_path,
+                    method_name,
+                )
                 kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names,n_order=n_order, output_path=output_path, in_path=group_file,group_format="groups")
 
             target_kde = Morph_Group(kde_samples, group_file, param_names=param_names, kde_bw=kde_bw, verbose=verbose, bw_json_path=bw_json_path)
         log_proposal_pdf = target_kde.logpdf
 
     elif morph_type == "tree":
-        print("\nUsing Morph_Tree for proposal distribution.")
+        logger.info("\nUsing Morph_Tree for proposal distribution.")
         tree_file = f"{output_path}/tree.json"
         if param_names is None:
             param_names = [f'param_{i}' for i in range(ndim)]
         if not os.path.exists(tree_file):
-            print(f"Tree file not found at {tree_file}. "
-                  "Running dependency tree computation... might take a while for higher dimensions. for faster results, use fewer samples per param.")
+            logger.info(
+                "Tree file not found at {}. Running dependency tree computation... might take a while for higher dimensions. for faster results, use fewer samples per param.",
+                tree_file,
+            )
             dependency_tree.compute_and_plot_mi_tree(samples, names=param_names, out_path=output_path, morph_type="tree")
 
         if bw_is_numeric:
@@ -242,7 +271,7 @@ def evidence(
     for i in range(n_estimations):
         
         samples_prop = target_kde.resample(n_resamples)
-        print(f"\nEstimation {i+1}/{n_estimations}")
+        logger.info("\nEstimation {}/{}", i + 1, n_estimations)
         log_z_results = bridge_sampling_ln(
             log_posterior_function,
             log_proposal_pdf,
@@ -258,6 +287,6 @@ def evidence(
     logz_path = f"{output_path}/logz_morph_z_{morph_type}_{kde_bw_name}.txt"
     header = "logz err"
     np.savetxt(logz_path, np.array(all_log_z_results), header=header, fmt='%f', comments='')
-    print(f"\nSaved log(z) to {logz_path}")
+    logger.info("\nSaved log(z) to {}", logz_path)
 
     return all_log_z_results

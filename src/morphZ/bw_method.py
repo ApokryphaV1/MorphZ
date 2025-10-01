@@ -43,6 +43,8 @@ from scipy.optimize import brentq
 from scipy.stats import gaussian_kde
 from sklearn.model_selection import KFold
 
+from .logger import logger
+
 
 ArrayLike = Union[np.ndarray, list, tuple]
 
@@ -570,9 +572,13 @@ def compute_and_save_bandwidths(
     with open(output_filename, "w", encoding="utf-8") as f:
         json.dump(simplified_output, f, indent=4)
 
-    print(f"Bandwidths saved to {output_filename}")
+    logger.info("Bandwidths saved to {}", output_filename)
     if in_path is not None:
-        print(f"Processed {len(selected_groups)} groups and {len(singles)} single parameters")
+        logger.info(
+            "Processed {} groups and {} single parameters",
+            len(selected_groups),
+            len(singles),
+        )
 
     return simplified_output
 
@@ -581,12 +587,18 @@ def compute_and_save_bandwidths(
 if __name__ == "__main__":
     rng = np.random.RandomState(0)
     x = rng.normal(size=200)
-    print("Scott factor (1D):", scott_factor(x))
-    print("Silverman factor (1D):", silverman_factor(x))
-    print("Legacy Scott h (1D):", scott_rule(x))
-    print("Legacy Silverman h (1D):", silverman_rule(x))
-    print("ISJ h (1D):", botev_isj_bandwidth(x, n_bins=2 ** 10))
-    print("ISJ factor (1D):", botev_isj_factor(x, n_bins=2 ** 10))
+    logger.info("Scott factor (1D): {}", scott_factor(x))
+    logger.info("Silverman factor (1D): {}", silverman_factor(x))
+    logger.info("Legacy Scott h (1D): {}", scott_rule(x))
+    logger.info("Legacy Silverman h (1D): {}", silverman_rule(x))
+    logger.info("ISJ h (1D): {}", botev_isj_bandwidth(x, n_bins=2 ** 10))
+    logger.info("ISJ factor (1D): {}", botev_isj_factor(x, n_bins=2 ** 10))
     X = rng.normal(size=(200, 3))
-    print("CV isotropic factor (3D):", cross_validation_bandwidth(X, kind="isotropic", cv=4))
-    print("CV diagonal factor (3D):", cross_validation_bandwidth(X, kind="diagonal", cv=4))
+    logger.info(
+        "CV isotropic factor (3D): {}",
+        cross_validation_bandwidth(X, kind="isotropic", cv=4),
+    )
+    logger.info(
+        "CV diagonal factor (3D): {}",
+        cross_validation_bandwidth(X, kind="diagonal", cv=4),
+    )

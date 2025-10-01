@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.special import logsumexp
+import sys
+from .logger import logger
 
 from . import utils
 
@@ -63,17 +65,21 @@ def bridge_sampling_ln(
             failure_count += 1
             continue
         finally:
-            # Ensure progress is always updated
-            print(f"\rEvaluating target distribution: {i+1}/{num_samples}", end="")
+            # Use raw sink write so progress stays on a single terminal line
+            sys.stderr.write(
+                f"\rEvaluating target distribution: {i + 1}/{num_samples}"
+            )
+            sys.stderr.flush()
 
     # Rebuild arrays from the lists of successful evaluations
     samples_prop = np.array(successful_samples)
     log_f_prop = np.array(log_f_prop_results)
-    print()
+    if num_samples:
+        sys.stderr.write("\n")  # Move to the next line after progress output
 
     if failure_count > 0:
-        print(
-            f"\nWarning: Evaluation of target distribution failed for {failure_count} samples, which were skipped."
+        logger.warning(
+            f"Evaluation of target distribution failed for {failure_count} samples, which were skipped."
         )
 
     # As a safeguard, filter out any remaining non-finite values (e.g., if f(theta) returned inf)
@@ -81,7 +87,7 @@ def bridge_sampling_ln(
 
     samples_prop = samples_prop[finite_mask]
     log_f_prop = log_f_prop[finite_mask]
-    print(
+    logger.info(
         f"Filtered proposal samples: {len(samples_prop)} valid samples out of {num_samples} total samples."
     )
     # Now compute log_g for the filtered samples. g expects (n_dims, n_samples)
@@ -91,8 +97,8 @@ def bridge_sampling_ln(
     N2 = len(log_f_prop)
 
     if N2 == 0:
-        print(
-            "\nWarning: No valid samples from the proposal distribution. Bridge sampling failed."
+        logger.warning(
+            "No valid samples from the proposal distribution. Bridge sampling failed."
         )
         return [np.nan, np.nan]
 
@@ -119,10 +125,10 @@ def bridge_sampling_ln(
         log_den = -np.log(N1) + utils.log_sum(log_terms_post)
 
         log_p_new = log_num - log_den
-        print(
-            f"\r iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}",
-            end="",
+        sys.stderr.write(
+            f"\r iteration: {t + 1} log(z) old: {log_p_old} log(z) New: {log_p_new}"
         )
+        sys.stderr.flush()
         # Check convergence:
         if np.abs(log_p_new - log_p_old) < tol:
             log_p_final = np.max([log_p_new, log_p_old])
@@ -139,9 +145,12 @@ def bridge_sampling_ln(
                 s1,
                 s2,
             )
-            print(
-                f"\r\nConverged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}",
-                end="",
+            sys.stderr.write("\n")
+            logger.success(
+                "Converged in {} iterations. log(z): {:.4f} +/-: {:.4f}",
+                t + 1,
+                log_p_final,
+                rmse_est,
             )
             return [log_p_final, rmse_est]
 
@@ -161,8 +170,9 @@ def bridge_sampling_ln(
         s1,
         s2,
     )
-    print(f"\nConvergence not reached within {max_iter} iterations.")
-    print(f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}")
+    sys.stderr.write("\n")
+    logger.warning("Convergence not reached within {} iterations.", max_iter)
+    logger.info("Final log(z): {:.4f} +/-: {:.4f}", log_p_final, rmse_est)
 
     return [log_p_final, rmse_est]
 
@@ -246,4 +256,3 @@ def compute_bridge_rmse(
     re2 = term1 + term2
 
     return np.sqrt(re2)
-
