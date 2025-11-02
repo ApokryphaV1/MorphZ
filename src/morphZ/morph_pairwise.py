@@ -3,11 +3,14 @@ pairwise_kde.py -- greedy pairwise KDE approximation (see module docstring in co
 """
 from __future__ import annotations
 import json
+import logging
 import os
 from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 from scipy.stats import gaussian_kde
 from .kde_base import KDEBase
+
+logger = logging.getLogger(__name__)
 
 
 class Morph_Pairwise(KDEBase):
@@ -155,11 +158,11 @@ class Morph_Pairwise(KDEBase):
                     self.pairs.append((na, nb, mi))
                     pool.remove(na); pool.remove(nb)
                     if self.verbose:
-                        print(f"Selected pair: {na}, {nb} (MI={mi:.4g})")
+                        logger.info("Selected pair: %s, %s (MI=%.4g)", na, nb, mi)
             self.singles = sorted(pool)
             if self.verbose:
-                print(f"Pairs selected ({len(self.pairs)}): {self.pairs}")
-                print(f"Singles ({len(self.singles)}): {self.singles}")
+                logger.info("Pairs selected (%s): %s", len(self.pairs), self.pairs)
+                logger.info("Singles (%s): %s", len(self.singles), self.singles)
         else:
             K = min(int(self.top_k_greedy), len(canonical))
             best_pairs, best_singles = [], self.param_names[:]  # placeholders
@@ -173,10 +176,10 @@ class Morph_Pairwise(KDEBase):
             self.pairs, self.singles = best_pairs, best_singles
             if self.verbose:
                 total_best = best_key[0] if best_key is not None else 0.0
-                print(f"Best-of-{K} seeded greedy total MI: {total_best:.4g}; pairs={len(self.pairs)}")
+                logger.info("Best-of-%s seeded greedy total MI: %.4g; pairs=%s", K, total_best, len(self.pairs))
                 for na, nb, mi in self.pairs:
-                    print(f"Selected pair: {na}, {nb} (MI={mi:.4g})")
-                print(f"Singles ({len(self.singles)}): {self.singles}")
+                    logger.info("Selected pair: %s, %s (MI=%.4g)", na, nb, mi)
+                logger.info("Singles (%s): %s", len(self.singles), self.singles)
         # Save selection next to source MI JSON if available
         try:
             if isinstance(param_mi, str):
@@ -189,10 +192,10 @@ class Morph_Pairwise(KDEBase):
                 with open(out_path, "w", encoding="utf-8") as f:
                     json.dump(payload, f, indent=2)
                 if self.verbose:
-                    print(f"Saved selection to {out_path}")
+                    logger.info("Saved selection to %s", out_path)
         except Exception as e:  # pragma: no cover
             if self.verbose:
-                print(f"Warning: failed to write selected_pairs.json: {e}")
+                logger.warning("Failed to write selected_pairs.json: %s", e)
 
         self._fit_kdes()
 
@@ -221,7 +224,7 @@ class Morph_Pairwise(KDEBase):
                 # String method like 'silverman' or 'scott'
                 bw_scalar = bw
             if self.verbose:
-                print(f"approx kde for pair{[na, nb]} with bw: {bw_scalar}")
+                logger.info("approx kde for pair%s with bw: %s", [na, nb], bw_scalar)
             kde2 = gaussian_kde(arr, bw_method=bw_scalar)
             self.pair_kdes.append({"names": (na, nb), "indices": (i, j), "mi": mi, "kde": kde2})
 

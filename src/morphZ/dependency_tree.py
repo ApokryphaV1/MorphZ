@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import warnings
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -17,6 +18,8 @@ try:
     import pandas as pd  # optional, only for CSV labels
 except ImportError:  # pragma: no cover
     pd = None  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 
 ###############################################################################
@@ -220,7 +223,9 @@ def plot_chow_liu_tree(
         # Use graphviz for a hierarchical layout that avoids overlaps
         pos = nx.nx_agraph.graphviz_layout(tree, prog='dot')
     except ImportError:
-        print("PyGraphviz not found, falling back to spring_layout. For a better layout, please install pygraphviz.")
+        logger.warning(
+            "PyGraphviz not found, falling back to spring_layout. For a better layout, please install pygraphviz."
+        )
         pos = nx.spring_layout(tree, seed=42) # spring layout for equal branches
 
 
@@ -361,22 +366,22 @@ def compute_and_plot_mi_tree(
     if save_tree_artifacts and json_path:
         with open(json_path, "w", encoding="utf8") as fp:
             json.dump(dep_edges, fp, indent=2, default=str)
-        print(f"\nDependency list saved to {json_path}")
+        logger.info("Dependency list saved to %s", json_path)
 
     # Top‑10 MI pairs for reference
     tri = np.triu_indices_from(mi, k=1)
     all_pairs = sorted(zip(tri[0], tri[1], mi[tri]), key=lambda x: x[2], reverse=True)
     top10 = all_pairs[:10]
-    print("\nTop 10 MI pairs:")
+    logger.info("Top 10 MI pairs:")
     for i, j, val in top10:
-        print(f"  {labels[i]} — {labels[j]} : {val:.6f}")
+        logger.info("  %s — %s : %.6f", labels[i], labels[j], val)
 
     if out_path:
         mi_path = Path(out_path) / "params_MI.json"
         mi_data = [[labels[i], labels[j], val] for i, j, val in all_pairs]
         with open(mi_path, "w", encoding="utf8") as f:
             json.dump(mi_data, f, indent=2)
-        print(f"All MI pairs saved to {mi_path}")
+        logger.info("All MI pairs saved to %s", mi_path)
 
 
     return mi, mst, dep_edges

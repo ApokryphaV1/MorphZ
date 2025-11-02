@@ -1,7 +1,9 @@
-import numpy as np
 import json
+import logging
 import os
 from typing import Callable, Dict, List, Optional, Union
+
+import numpy as np
 try:
     # Literal is available in Python 3.8+
     from typing import Literal
@@ -27,6 +29,197 @@ from .morph_group import Morph_Group
 from . import Nth_TC
 from .bw_method import compute_and_save_bandwidths
 from .bridge import bridge_sampling_ln, compute_bridge_rmse
+
+logger = logging.getLogger(__name__)
+
+
+def _save_corner_plot(
+    posterior_samples: np.ndarray,
+    proposal_samples: np.ndarray,
+    param_names: Optional[List[str]],
+    output_path: str,
+    morph_type: str,
+    verbose: bool,
+    prefer_corner: bool,
+) -> None:
+    """Render and save a corner-style comparison plot for posterior vs proposal."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+
+        corner_fig = None
+        if prefer_corner:
+            try:
+                import corner as corner_lib  # type: ignore
+
+                def _downsample(arr: np.ndarray, max_points: int = 50000) -> np.ndarray:
+                    n = arr.shape[0]
+                    if n <= max_points:
+                        return arr
+                    idx = np.random.choice(n, size=max_points, replace=False)
+                    return arr[idx]
+
+                post_plot = _downsample(posterior_samples)
+                prop_plot = _downsample(proposal_samples)
+                names = param_names if param_names is not None else [f"param_{j}" for j in range(post_plot.shape[1])]
+
+                corner_fig = corner_lib.corner(
+                    post_plot,
+                    bins=50,
+                    color="black",
+                    labels=names,
+                    label_kwargs={"fontsize": 7},
+                    hist_kwargs={"density": True},
+                    quantiles=[0.05, 0.5, 0.95],
+                    show_titles=True,
+                    title_fmt=".2f",
+                    plot_datapoints=True,
+                    fill_contours=True,
+                    levels=(0.5, 0.8, 0.95),
+                    smooth=0.9,
+                    pcolor_kwargs=dict(alpha=0.06),
+                    contour_kwargs=dict(alpha=0.4, colors=["black"]),
+                )
+                corner_lib.corner(
+                    prop_plot,
+                    bins=50,
+                    color="red",
+                    labels=names,
+                    label_kwargs={"fontsize": 7},
+                    hist_kwargs={"density": True},
+                    quantiles=[0.05, 0.5, 0.95],
+                    show_titles=True,
+                    title_fmt=".2f",
+                    plot_datapoints=True,
+                    fill_contours=True,
+                    levels=(0.5, 0.8, 0.95),
+                    smooth=0.9,
+                    pcolor_kwargs=dict(alpha=0.04),
+                    contour_kwargs=dict(alpha=0.4, colors=["red"]),
+                    fig=corner_fig,
+                )
+
+                fig = corner_fig
+                
+                fig.plot([], [], color="black", label="Posterior samples"),
+                fig.plot([], [], color="red", label="Morph samples"),
+    
+                fig.legend(handles=legend_elems, loc="upper right", frameon=False)
+                fig.tight_layout(rect=[0, 0, 0.96, 1])
+                corner_fname = os.path.join(output_path, f"corner_{morph_type}.png")
+                fig.savefig(corner_fname, dpi=150)
+                plt.close(fig)
+                if verbose:
+                    logger.info("Saved corner plot via 'corner' to %s", corner_fname)
+                return
+            except Exception:
+                corner_fig = None
+
+        # Fallback: Matplotlib implementation with KDE contours
+        def _downsample(arr: np.ndarray, max_points: int = 10000) -> np.ndarray:
+            n = arr.shape[0]
+            if n <= max_points:
+                return arr
+            idx = np.random.choice(n, size=max_points, replace=False)
+            return arr[idx]
+
+        post_plot = _downsample(posterior_samples)
+        prop_plot = _downsample(proposal_samples)
+
+        d = post_plot.shape[1]
+        fig, axes = plt.subplots(d, d, figsize=(2.2 * d, 2.2 * d), squeeze=False)
+        names = param_names if param_names is not None else [f"param_{j}" for j in range(d)]
+
+        from scipy.stats import gaussian_kde as _gaussian_kde
+
+        def _kde_contours(x, y, levels=(0.5, 0.8, 0.95), smooth=0.9, gridsize=64):
+            xy = np.vstack([x, y])
+            kde = _gaussian_kde(xy, bw_method=smooth)
+            xmin, xmax = np.percentile(x, [0.5, 99.5])
+            ymin, ymax = np.percentile(y, [0.5, 99.5])
+            X, Y = np.meshgrid(
+                np.linspace(xmin, xmax, gridsize),
+                np.linspace(ymin, ymax, gridsize),
+            )
+            grid = np.vstack([X.ravel(), Y.ravel()])
+            Z = kde(grid).reshape(X.shape)
+            P = Z / Z.sum()
+            flat = P.ravel()
+            idx = np.argsort(flat)[::-1]
+            cumsum = np.cumsum(flat[idx])
+            thr = []
+            for a in levels:
+                k = np.searchsorted(cumsum, a)
+                t = flat[idx[k]] if k < len(flat) else flat[idx[-1]]
+                thr.append(t * Z.sum())
+            thr = np.sort(thr)
+            return X, Y, Z, thr
+
+        for r in range(d):
+            for c in range(d):
+                ax = axes[r, c]
+                if r == c:
+                    h_kwargs = dict(bins=50, density=True)
+                    ax.hist(
+                        post_plot[:, c],
+                        color="black",
+                        alpha=0.6,
+                        label="Posterior samples",
+                        **h_kwargs,
+                    )
+                    ax.hist(
+                        prop_plot[:, c],
+                        color="red",
+                        alpha=0.4,
+                        label="Morph samples",
+                        **h_kwargs,
+                    )
+                    for q in [0.05, 0.5, 0.95]:
+                        ax.axvline(np.quantile(post_plot[:, c], q), color="black", lw=1, alpha=0.7)
+                        ax.axvline(np.quantile(prop_plot[:, c], q), color="red", lw=1, alpha=0.6)
+                    med = np.quantile(post_plot[:, c], 0.5)
+                    ax.set_title(f"{med:.2f}", fontsize=6)
+                elif r > c:
+                    x_post, y_post = post_plot[:, c], post_plot[:, r]
+                    x_prop, y_prop = prop_plot[:, c], prop_plot[:, r]
+                    ax.scatter(x_post, y_post, s=3, c="black", alpha=0.15)
+                    ax.scatter(x_prop, y_prop, s=3, c="red", alpha=0.12)
+                    X, Y, Z, thr = _kde_contours(x_post, y_post)
+                    ax.contourf(X, Y, Z, levels=np.r_[0, thr], colors=["black"], alpha=0.05)
+                    ax.contour(X, Y, Z, levels=thr, colors="black", linewidths=0.8, alpha=0.6)
+                    X2, Y2, Z2, thr2 = _kde_contours(x_prop, y_prop)
+                    ax.contourf(X2, Y2, Z2, levels=np.r_[0, thr2], colors=["red"], alpha=0.04)
+                    ax.contour(X2, Y2, Z2, levels=thr2, colors="red", linewidths=0.8, alpha=0.6)
+                else:
+                    ax.set_visible(False)
+                    continue
+
+                if r == d - 1:
+                    ax.set_xlabel(names[c], fontsize=7)
+                else:
+                    ax.set_xticklabels([])
+                if c == 0:
+                    ax.set_ylabel(names[r], fontsize=7)
+                else:
+                    ax.set_yticklabels([])
+                ax.tick_params(labelsize=6)
+
+        legend_elems = [
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="black", markersize=6, label="Posterior samples"),
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="red", markersize=6, label="Morph samples"),
+        ]
+        fig.legend(handles=legend_elems, loc="upper right", frameon=False)
+        fig.tight_layout(rect=[0, 0, 0.96, 1])
+        corner_fname = os.path.join(output_path, f"corner_{morph_type}.png")
+        fig.savefig(corner_fname, dpi=150)
+        plt.close(fig)
+        if verbose:
+            logger.info("Saved corner plot (fallback) to %s", corner_fname)
+    except Exception as exc:  # pragma: no cover
+        if verbose:
+            logger.warning("Corner plot generation failed: %s", exc)
 
 # ----- Typing helpers for better IDE hovers -----
 # Bandwidth methods supported by bw_method.py
@@ -57,6 +250,8 @@ def evidence(
     kde_bw: Optional[Union[BandwidthMethod, float, Dict[str, float]]] = None,
     verbose: bool = False,
     top_k_greedy: int = None,
+    plot: bool = False,
+    prefer_corner: bool = True,
 ) -> List[List[float]]:
     """
     Compute log evidence using morphological bridge sampling with KDE proposals.
@@ -108,6 +303,16 @@ def evidence(
             seeded greedy selections starting from each of the top‑K candidates
             (by MI or TC), and keep the selection with the highest total score.
             Default is 1 (single greedy pass as before).
+        plot (bool): If True, saves a corner plot comparing posterior samples
+            (black) and proposal samples (red) as a PNG in ``output_path``.
+            The plot is not displayed.
+        prefer_corner (bool): If True and the ``corner`` package is available,
+            uses it to render the corner plot with filled contours and the
+            following style: ``bins=50``, ``quantiles=(0.05,0.5,0.95)``,
+            ``show_titles=True``, ``title_fmt='.2f'``, ``plot_datapoints=True``,
+            ``fill_contours=True``, ``levels=(0.5,0.8,0.95)``, ``smooth=0.9``.
+            Falls back to a Matplotlib implementation with similar aesthetics
+            (including 2D KDE contours) if ``corner`` is not installed.
 
     Returns:
         list[[float, float]]: A list of ``[logz, err]`` for each estimation.
@@ -147,42 +352,54 @@ def evidence(
         if morph_type == "pair":
             top_k_greedy = comb(ndim, 2)
             if verbose:
-             print(f"Setting top_k_greedy to {top_k_greedy} for pairs selection.")
+                logger.info("Setting top_k_greedy to %s for pairs selection.", top_k_greedy)
         elif "group" in morph_type:
             n_order = int(morph_type.split("_")[0])
             top_k_greedy = int(np.sqrt(comb(ndim, n_order))) # sqrt of number of possible groups
             if verbose:
-                print(f"Setting top_k_greedy to {top_k_greedy} for {n_order}-groups selection.")
+                logger.info("Setting top_k_greedy to %s for %s-groups selection.", top_k_greedy, n_order)
 
     if param_names is None:
-                param_names = [f'param_{i}' for i in range(ndim)]
+        param_names = [f"param_{i}" for i in range(ndim)]
 
     if morph_type == "indep":
-        print("\nUsing independent KDE for proposal distribution.")
+        logger.info("Using independent KDE for proposal distribution.")
         if bw_is_numeric:
             if verbose:
-                print(f"\nKDE bandwidth method: {kde_bw} (numeric: {bw_is_numeric})")
+                logger.info("KDE bandwidth method: %s (numeric: %s)", kde_bw, bw_is_numeric)
             # Pass numeric bandwidth directly; do not compute or load JSON
             target_kde = Morph_Indep(kde_samples, kde_bw=kde_bw, param_names=param_names, verbose=verbose, bw_json_path=None)
         else:
             method_name = kde_bw  # Store original method name
-            bw_json_path= f"{output_path}/bw_{method_name}_1D.json"
+            bw_json_path = f"{output_path}/bw_{method_name}_1D.json"
 
             if not os.path.exists(bw_json_path):
-                print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
+                logger.info("BW file not found at %s. Running Bw with %s...", bw_json_path, method_name)
 
-                kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names,n_order=1, output_path=output_path)
-            target_kde = Morph_Indep(kde_samples, kde_bw=kde_bw, param_names=param_names,verbose=verbose, bw_json_path=bw_json_path)
+                kde_bw = compute_and_save_bandwidths(
+                    kde_samples,
+                    method=method_name,
+                    param_names=param_names,
+                    n_order=1,
+                    output_path=output_path,
+                )
+            target_kde = Morph_Indep(
+                kde_samples,
+                kde_bw=kde_bw,
+                param_names=param_names,
+                verbose=verbose,
+                bw_json_path=bw_json_path,
+            )
         log_proposal_pdf = target_kde.logpdf_kde
 
     elif morph_type == "pair":
-        print("\nUsing Morph_Pairwise for proposal distribution.")
+        logger.info("Using Morph_Pairwise for proposal distribution.")
         mi_file = f"{output_path}/params_MI.json"
         if param_names is None:
-                param_names = [f'param_{i}' for i in range(ndim)]
+            param_names = [f"param_{i}" for i in range(ndim)]
 
         if not os.path.exists(mi_file):
-            print(f"MI file not found at {mi_file}. Running dependency tree computation...")
+            logger.info("MI file not found at %s. Running dependency tree computation...", mi_file)
             dependency_tree.compute_and_plot_mi_tree(samples, names=param_names, out_path=output_path, morph_type="pair")
 
         if bw_is_numeric:
@@ -209,14 +426,14 @@ def evidence(
                     f.write(content)
             except Exception as e:  # pragma: no cover
                 if verbose:
-                    print(f"Warning: failed to write selected_pairs.json: {e}")
+                    logger.warning("Failed to write selected_pairs.json: %s", e)
         else:
             method_name = kde_bw  # Store original method name
 
-            bw_json_path= f"{output_path}/bw_{method_name}_2D.json"
+            bw_json_path = f"{output_path}/bw_{method_name}_2D.json"
             
             if not os.path.exists(bw_json_path):
-                print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
+                logger.info("BW file not found at %s. Running Bw with %s...", bw_json_path, method_name)
                 kde_bw = compute_and_save_bandwidths(
                     kde_samples,
                     method=method_name,
@@ -249,27 +466,22 @@ def evidence(
                     f.write(content)
             except Exception as e:  # pragma: no cover
                 if verbose:
-                    print(f"Warning: failed to write selected_pairs.json: {e}")
+                    logger.warning("Failed to write selected_pairs.json: %s", e)
         log_proposal_pdf = target_kde.logpdf
 
     elif "group" in morph_type:
-        print("\nUsing Morph_Group for proposal distribution.")
+        logger.info("Using Morph_Group for proposal distribution.")
         n_order = int(morph_type.split("_")[0])
         group_file = f"{output_path}/params_{n_order}-order_TC.json"
         if param_names is None:
-                param_names = [f'param_{i}' for i in range(ndim)]
+            param_names = [f"param_{i}" for i in range(ndim)]
         if not os.path.exists(group_file):
-            print(f"Group file not found at {group_file}. Running total correlation computation...")
+            logger.info("Group file not found at %s. Running total correlation computation...", group_file)
+            Nth_TC.compute_and_save_tc(samples, names=param_names, n_order=n_order, out_path=output_path)
 
-            Nth_TC.compute_and_save_tc(samples,names=param_names,n_order=n_order,out_path=output_path)
-
-        # Convert group file format if needed for bandwidth computation
-        import json
-        with open(group_file, 'r') as f:
-            group_data = json.load(f)
         if bw_is_numeric:
             if verbose:
-                print(f"\nKDE bandwidth method: {kde_bw} (numeric: {bw_is_numeric})")
+                logger.info("KDE bandwidth method: %s (numeric: %s)", kde_bw, bw_is_numeric)
             target_kde = Morph_Group(
                 kde_samples,
                 group_file,
@@ -292,13 +504,13 @@ def evidence(
                     f.write(content)
             except Exception as e:  # pragma: no cover
                 if verbose:
-                    print(f"Warning: failed to write selected_{n_order}-order_group.json: {e}")
+                    logger.warning("Failed to write selected_%s-order_group.json: %s", n_order, e)
         else:
             method_name = kde_bw  # Store original method name
-            bw_json_path= f"{output_path}/bw_{method_name}_{n_order}D.json"
+            bw_json_path = f"{output_path}/bw_{method_name}_{n_order}D.json"
 
             if not os.path.exists(bw_json_path):
-                print(f"BW file not found at {bw_json_path}. Running Bw with {method_name}...")
+                logger.info("BW file not found at %s. Running Bw with %s...", bw_json_path, method_name)
                 kde_bw = compute_and_save_bandwidths(
                     kde_samples,
                     method=method_name,
@@ -332,17 +544,19 @@ def evidence(
                     f.write(content)
             except Exception as e:  # pragma: no cover
                 if verbose:
-                    print(f"Warning: failed to write selected_{n_order}-order_group.json: {e}")
+                    logger.warning("Failed to write selected_%s-order_group.json: %s", n_order, e)
         log_proposal_pdf = target_kde.logpdf
 
     elif morph_type == "tree":
-        print("\nUsing Morph_Tree for proposal distribution.")
+        logger.info("Using Morph_Tree for proposal distribution.")
         tree_file = f"{output_path}/tree.json"
         if param_names is None:
-            param_names = [f'param_{i}' for i in range(ndim)]
+            param_names = [f"param_{i}" for i in range(ndim)]
         if not os.path.exists(tree_file):
-            print(f"Tree file not found at {tree_file}. "
-                  "Running dependency tree computation... might take a while for higher dimensions. for faster results, use fewer samples per param.")
+            logger.info(
+                "Tree file not found at %s. Running dependency tree computation... might take a while for higher dimensions. for faster results, use fewer samples per param.",
+                tree_file,
+            )
             dependency_tree.compute_and_plot_mi_tree(samples, names=param_names, out_path=output_path, morph_type="tree")
 
         if bw_is_numeric:
@@ -350,7 +564,13 @@ def evidence(
             target_kde = Morph_Tree(kde_samples, tree_file=tree_file, param_names=param_names, kde_bw=kde_bw, bw_json_path=None)
         else:
             method_name = kde_bw  # Store original method name
-            kde_bw = compute_and_save_bandwidths(kde_samples, method=method_name, param_names=param_names,n_order= 2, output_path=output_path)
+            kde_bw = compute_and_save_bandwidths(
+                kde_samples,
+                method=method_name,
+                param_names=param_names,
+                n_order=2,
+                output_path=output_path,
+            )
             # Pass the JSON path to KDE class for automatic bandwidth loading
             bw_json_path = f"{output_path}/bw_{method_name}_2D.json"
             target_kde = Morph_Tree(kde_samples, tree_file=tree_file, param_names=param_names, kde_bw=kde_bw, bw_json_path=bw_json_path)
@@ -361,12 +581,28 @@ def evidence(
     bridge_start_index = int(tot_len * bridge_start_fraction)
     samples_mor = samples[bridge_start_index:, :]
     log_post = log_prob[bridge_start_index:]
+    # Optional: corner-style comparison plot of posterior vs proposal
+        
+    if plot :
+        samples_prop = target_kde.resample(n_resamples)
 
+        _save_corner_plot(
+            samples,
+            samples_prop,
+            param_names,
+            output_path,
+            morph_type,
+            verbose,
+            prefer_corner,
+        )
     all_log_z_results = []
     for i in range(n_estimations):
-        
+
         samples_prop = target_kde.resample(n_resamples)
-        print(f"\nEstimation {i+1}/{n_estimations}")
+        estimation_label = f"Estimation {i+1}/{n_estimations}"
+        if i > 0:
+            print()
+        logger.debug(estimation_label)
         log_z_results = bridge_sampling_ln(
             log_posterior_function,
             log_proposal_pdf,
@@ -374,14 +610,18 @@ def evidence(
             log_post,
             samples_prop,
             tol=tol,
-            max_iter=max_iter
+            max_iter=max_iter,
+            estimation_label=estimation_label,
         )
         all_log_z_results.append(log_z_results)
-        
+
+
     # Save log(z) and error
     logz_path = f"{output_path}/logz_morph_z_{morph_type}_{kde_bw_name}.txt"
     header = "logz err"
     np.savetxt(logz_path, np.array(all_log_z_results), header=header, fmt='%f', comments='')
-    print(f"\nSaved log(z) to {logz_path}")
+    final_msg = f"\nSaved log(z) to {logz_path}"
+    print(final_msg)
+    logger.debug(final_msg.strip())
 
     return all_log_z_results

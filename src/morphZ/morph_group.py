@@ -3,12 +3,15 @@ morph_group.py -- greedy group-based KDE approximation.
 """
 from __future__ import annotations
 import json
+import logging
 import os
 import re
 from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 from scipy.stats import gaussian_kde
 from .kde_base import KDEBase
+
+logger = logging.getLogger(__name__)
 
 
 class Morph_Group(KDEBase):
@@ -159,12 +162,16 @@ class Morph_Group(KDEBase):
                     for name in names:
                         pool.remove(name)
                     if self.verbose:
-                        print(f"Selected group: {', '.join(names)} (TC={tc:.4g})")
+                        logger.info("Selected group: %s (TC=%.4g)", ", ".join(names), tc)
 
             self.singles = sorted(pool)
             if self.verbose:
-                print(f"Groups selected ({len(self.groups)}): {[g['names'] for g in self.groups]}")
-                print(f"Singles ({len(self.singles)}): {self.singles}")
+                logger.info(
+                    "Groups selected (%s): %s",
+                    len(self.groups),
+                    [g["names"] for g in self.groups],
+                )
+                logger.info("Singles (%s): %s", len(self.singles), self.singles)
         else:
             K = min(int(self.top_k_greedy), len(canonical))
             best_groups, best_singles = [], self.param_names[:]  # placeholders
@@ -178,10 +185,19 @@ class Morph_Group(KDEBase):
             self.groups, self.singles = best_groups, best_singles
             if self.verbose:
                 total_best = best_key[0] if best_key is not None else 0.0
-                print(f"Best-of-{K} seeded greedy total TC: {total_best:.4g}; groups={len(self.groups)}")
+                logger.info(
+                    "Best-of-%s seeded greedy total TC: %.4g; groups=%s",
+                    K,
+                    total_best,
+                    len(self.groups),
+                )
                 for g in self.groups:
-                    print(f"Selected group: {', '.join(g['names'])} (TC={g['tc']:.4g})")
-                print(f"Singles ({len(self.singles)}): {self.singles}")
+                    logger.info(
+                        "Selected group: %s (TC=%.4g)",
+                        ", ".join(g["names"]),
+                        g["tc"],
+                    )
+                logger.info("Singles (%s): %s", len(self.singles), self.singles)
         # Save selection next to source TC JSON if available
         try:
             if isinstance(param_tc, str):
@@ -208,10 +224,10 @@ class Morph_Group(KDEBase):
                 with open(out_path, "w", encoding="utf-8") as f:
                     json.dump(payload, f, indent=2)
                 if self.verbose:
-                    print(f"Saved selection to {out_path}")
+                    logger.info("Saved selection to %s", out_path)
         except Exception as e:  # pragma: no cover
             if self.verbose:
-                print(f"Warning: failed to write selected group file: {e}")
+                logger.warning("Failed to write selected group file: %s", e)
 
         self._fit_kdes()
 
@@ -241,7 +257,7 @@ class Morph_Group(KDEBase):
                 # String method like 'silverman' or 'scott'
                 bw_scalar = bw
             if self.verbose:
-                print(f"approx kde for group{names} with bw: {bw_scalar}")
+                logger.info("approx kde for group%s with bw: %s", names, bw_scalar)
             kde = gaussian_kde(arr, bw_method=bw_scalar)
             self.group_kdes.append({"names": names, "indices": indices, "tc": group_info["tc"], "kde": kde})
 
@@ -260,7 +276,7 @@ class Morph_Group(KDEBase):
             else:
                 bw_scalar = bw
             if self.verbose:
-                print(f"approx kde for singles{name} with bw: {bw_scalar}")
+                logger.info("approx kde for singles%s with bw: %s", name, bw_scalar)
             kde1 = gaussian_kde(arr, bw_method=bw_scalar)
             self.single_kdes[name] = {"index": i, "kde": kde1}
 

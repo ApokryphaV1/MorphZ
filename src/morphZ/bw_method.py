@@ -32,12 +32,15 @@ Notes
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from collections import defaultdict
 from typing import Literal, Tuple, Union
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 from scipy.fft import dct
 from scipy.optimize import brentq
 from scipy.stats import gaussian_kde
@@ -625,9 +628,14 @@ def compute_and_save_bandwidths(
     with open(output_filename, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"Bandwidths saved to {output_filename}")
+    logger.info("Bandwidths saved to %s", output_filename)
     if in_path is not None:
-        print(f"Processed {len(selected_groups)} {top_key} and {len(singles)} single parameters")
+        logger.info(
+            "Processed %s %s and %s single parameters",
+            len(selected_groups),
+            top_key,
+            len(singles),
+        )
 
     # Return bandwidth mapping for optional immediate use (used as overrides)
     return bandwidths
@@ -635,14 +643,15 @@ def compute_and_save_bandwidths(
 
 # quick smoke test when run as script
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     rng = np.random.RandomState(0)
     x = rng.normal(size=200)
-    print("Scott factor (1D):", scott_factor(x))
-    print("Silverman factor (1D):", silverman_factor(x))
-    print("Legacy Scott h (1D):", scott_rule(x))
-    print("Legacy Silverman h (1D):", silverman_rule(x))
-    print("ISJ h (1D):", botev_isj_bandwidth(x, n_bins=2 ** 10))
-    print("ISJ factor (1D):", botev_isj_factor(x, n_bins=2 ** 10))
+    logger.info("Scott factor (1D): %s", scott_factor(x))
+    logger.info("Silverman factor (1D): %s", silverman_factor(x))
+    logger.info("Legacy Scott h (1D): %s", scott_rule(x))
+    logger.info("Legacy Silverman h (1D): %s", silverman_rule(x))
+    logger.info("ISJ h (1D): %s", botev_isj_bandwidth(x, n_bins=2 ** 10))
+    logger.info("ISJ factor (1D): %s", botev_isj_factor(x, n_bins=2 ** 10))
     X = rng.normal(size=(200, 3))
-    print("CV isotropic factor (3D):", cross_validation_bandwidth(X, kind="isotropic", cv=4))
-    print("CV diagonal factor (3D):", cross_validation_bandwidth(X, kind="diagonal", cv=4))
+    logger.info("CV isotropic factor (3D): %s", cross_validation_bandwidth(X, kind="isotropic", cv=4))
+    logger.info("CV diagonal factor (3D): %s", cross_validation_bandwidth(X, kind="diagonal", cv=4))

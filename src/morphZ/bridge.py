@@ -1,7 +1,12 @@
+import logging
+from typing import Optional
+
 import numpy as np
 from scipy.special import logsumexp
 
 from . import utils
+
+logger = logging.getLogger(__name__)
 
 
 def bridge_sampling_ln(
@@ -12,6 +17,7 @@ def bridge_sampling_ln(
     samples_prop,
     tol=1e-4,
     max_iter=40000,
+    estimation_label: Optional[str] = None,
 ):
     """
     Estimate log marginal likelihood log p(y) using bridge sampling in log space.
@@ -64,16 +70,15 @@ def bridge_sampling_ln(
             continue
         finally:
             # Ensure progress is always updated
-            print(f"\rEvaluating target distribution: {i+1}/{num_samples}", end="")
+            logger.debug("Evaluating target distribution: %s/%s", i + 1, num_samples)
 
     # Rebuild arrays from the lists of successful evaluations
     samples_prop = np.array(successful_samples)
     log_f_prop = np.array(log_f_prop_results)
-    print()
-
     if failure_count > 0:
-        print(
-            f"\nWarning: Evaluation of target distribution failed for {failure_count} samples, which were skipped."
+        logger.warning(
+            "Evaluation of target distribution failed for %s samples, which were skipped.",
+            failure_count,
         )
 
     # As a safeguard, filter out any remaining non-finite values (e.g., if f(theta) returned inf)
@@ -81,9 +86,11 @@ def bridge_sampling_ln(
 
     samples_prop = samples_prop[finite_mask]
     log_f_prop = log_f_prop[finite_mask]
-    print(
+    message = (
         f"Filtered proposal samples: {len(samples_prop)} valid samples out of {num_samples} total samples."
     )
+    print(message)
+    logger.info(message)
     # Now compute log_g for the filtered samples. g expects (n_dims, n_samples)
     log_g_prop = g(samples_prop.T)
 
@@ -91,9 +98,9 @@ def bridge_sampling_ln(
     N2 = len(log_f_prop)
 
     if N2 == 0:
-        print(
-            "\nWarning: No valid samples from the proposal distribution. Bridge sampling failed."
-        )
+        warning_msg = "No valid samples from the proposal distribution. Bridge sampling failed."
+        print(f"\n{warning_msg}")
+        logger.warning(warning_msg)
         return [np.nan, np.nan]
 
     s1 = N1 / (N1 + N2)
@@ -105,6 +112,7 @@ def bridge_sampling_ln(
     term1 = np.log(s1) + log_f_prop
     term1_post = np.log(s1) + log_f_post
 
+    last_iteration_msg = ""
     for t in range(max_iter):
         # For proposal samples:
         term2 = np.log(s2) + log_p_old + log_g_prop
@@ -119,10 +127,8 @@ def bridge_sampling_ln(
         log_den = -np.log(N1) + utils.log_sum(log_terms_post)
 
         log_p_new = log_num - log_den
-        print(
-            f"\r iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}",
-            end="",
-        )
+        last_iteration_msg = f"iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}"
+        logger.info(last_iteration_msg)
         # Check convergence:
         if np.abs(log_p_new - log_p_old) < tol:
             log_p_final = np.max([log_p_new, log_p_old])
@@ -139,9 +145,20 @@ def bridge_sampling_ln(
                 s1,
                 s2,
             )
-            print(
-                f"\r\nConverged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}",
-                end="",
+            success_msg = f"Converged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}"
+            if estimation_label is not None:
+                block = "\n".join(
+                    line for line in (estimation_label, last_iteration_msg, success_msg) if line
+                )
+                print(block)
+            else:
+                print(last_iteration_msg)
+                print(success_msg)
+            logger.info(
+                "Converged in %s iterations. log(z): %.4f +/-: %.4f",
+                t + 1,
+                log_p_final,
+                rmse_est,
             )
             return [log_p_final, rmse_est]
 
@@ -161,8 +178,19 @@ def bridge_sampling_ln(
         s1,
         s2,
     )
-    print(f"\nConvergence not reached within {max_iter} iterations.")
-    print(f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}")
+    failure_msg = f"Convergence not reached within {max_iter} iterations."
+    final_msg = f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}"
+    if estimation_label is not None:
+        block_lines = [estimation_label]
+        if last_iteration_msg:
+            block_lines.append(last_iteration_msg)
+        block_lines.extend([failure_msg, final_msg])
+        print("\n".join(block_lines))
+    else:
+        print(failure_msg)
+        print(final_msg)
+    logger.warning("Convergence not reached within %s iterations.", max_iter)
+    logger.info("Final log(z): %.4f +/-: %.4f", log_p_final, rmse_est)
 
     return [log_p_final, rmse_est]
 
@@ -246,4 +274,3 @@ def compute_bridge_rmse(
     re2 = term1 + term2
 
     return np.sqrt(re2)
-

@@ -1,9 +1,13 @@
+import json
+import logging
+from typing import Union, Dict, Any
+
+import emcee
 import numpy as np
 from scipy.stats import gaussian_kde
-import json
-import emcee
-from typing import Union, Dict, Any
 from .kde_base import KDEBase
+
+logger = logging.getLogger(__name__)
 
 
 class Morph_Tree(KDEBase):
@@ -43,7 +47,7 @@ class Morph_Tree(KDEBase):
             raise ValueError("data must be a 2D array-like object with shape (n_samples, n_params)")
 
         n_samples, n_params = data.shape
-        print(f"Morph_Tree initialized with {n_params} dimensional data shape.")
+        logger.info("Morph_Tree initialized with %s dimensional data shape.", n_params)
 
         if param_names is None:
             param_names = [f"param_{i}" for i in range(n_params)]
@@ -207,7 +211,12 @@ class Morph_Tree(KDEBase):
             raise ValueError("No independent samples were generated. The MCMC chain may be too short or the autocorrelation time is severely underestimated.")
         
         if thinned_samples.shape[0] < n_resamples:
-            print(f"Warning: Not enough independent samples generated ({thinned_samples.shape[0]}/{n_resamples}). The autocorrelation time may be underestimated. Sampling with replacement to get {n_resamples} samples.")
+            logger.warning(
+                "Not enough independent samples generated (%s/%s). The autocorrelation time may be underestimated. Sampling with replacement to get %s samples.",
+                thinned_samples.shape[0],
+                n_resamples,
+                n_resamples,
+            )
             return thinned_samples[np.random.choice(thinned_samples.shape[0], n_resamples, replace=True)]
 
         return thinned_samples[np.random.choice(thinned_samples.shape[0], n_resamples, replace=False)]
