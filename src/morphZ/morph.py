@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import warnings
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -42,184 +43,91 @@ def _save_corner_plot(
     verbose: bool,
     prefer_corner: bool,
 ) -> None:
-    """Render and save a corner-style comparison plot for posterior vs proposal."""
+    """Render and save a corner plot comparing posterior and proposal samples."""
+    if not prefer_corner:
+        if verbose:
+            logger.info("Skipping corner plot because prefer_corner=False")
+        return
+
     try:
         import matplotlib
         matplotlib.use("Agg", force=True)
         import matplotlib.pyplot as plt
         from matplotlib.lines import Line2D
-
-        corner_fig = None
-        if prefer_corner:
-            try:
-                import corner as corner_lib  # type: ignore
-
-                def _downsample(arr: np.ndarray, max_points: int = 50000) -> np.ndarray:
-                    n = arr.shape[0]
-                    if n <= max_points:
-                        return arr
-                    idx = np.random.choice(n, size=max_points, replace=False)
-                    return arr[idx]
-
-                post_plot = _downsample(posterior_samples)
-                prop_plot = _downsample(proposal_samples)
-                names = param_names if param_names is not None else [f"param_{j}" for j in range(post_plot.shape[1])]
-
-                corner_fig = corner_lib.corner(
-                    post_plot,
-                    bins=50,
-                    color="black",
-                    labels=names,
-                    label_kwargs={"fontsize": 7},
-                    hist_kwargs={"density": True},
-                    quantiles=[0.05, 0.5, 0.95],
-                    show_titles=True,
-                    title_fmt=".2f",
-                    plot_datapoints=True,
-                    fill_contours=True,
-                    levels=(0.5, 0.8, 0.95),
-                    smooth=0.9,
-                    pcolor_kwargs=dict(alpha=0.06),
-                    contour_kwargs=dict(alpha=0.4, colors=["black"]),
-                )
-                corner_lib.corner(
-                    prop_plot,
-                    bins=50,
-                    color="red",
-                    labels=names,
-                    label_kwargs={"fontsize": 7},
-                    hist_kwargs={"density": True},
-                    quantiles=[0.05, 0.5, 0.95],
-                    show_titles=True,
-                    title_fmt=".2f",
-                    plot_datapoints=True,
-                    fill_contours=True,
-                    levels=(0.5, 0.8, 0.95),
-                    smooth=0.9,
-                    pcolor_kwargs=dict(alpha=0.04),
-                    contour_kwargs=dict(alpha=0.4, colors=["red"]),
-                    fig=corner_fig,
-                )
-
-                fig = corner_fig
-                
-                fig.plot([], [], color="black", label="Posterior samples"),
-                fig.plot([], [], color="red", label="Morph samples"),
-    
-                fig.legend(handles=legend_elems, loc="upper right", frameon=False)
-                fig.tight_layout(rect=[0, 0, 0.96, 1])
-                corner_fname = os.path.join(output_path, f"corner_{morph_type}.png")
-                fig.savefig(corner_fname, dpi=150)
-                plt.close(fig)
-                if verbose:
-                    logger.info("Saved corner plot via 'corner' to %s", corner_fname)
-                return
-            except Exception:
-                corner_fig = None
-
-        # Fallback: Matplotlib implementation with KDE contours
-        def _downsample(arr: np.ndarray, max_points: int = 10000) -> np.ndarray:
-            n = arr.shape[0]
-            if n <= max_points:
-                return arr
-            idx = np.random.choice(n, size=max_points, replace=False)
-            return arr[idx]
-
-        post_plot = _downsample(posterior_samples)
-        prop_plot = _downsample(proposal_samples)
-
-        d = post_plot.shape[1]
-        fig, axes = plt.subplots(d, d, figsize=(2.2 * d, 2.2 * d), squeeze=False)
-        names = param_names if param_names is not None else [f"param_{j}" for j in range(d)]
-
-        from scipy.stats import gaussian_kde as _gaussian_kde
-
-        def _kde_contours(x, y, levels=(0.5, 0.8, 0.95), smooth=0.9, gridsize=64):
-            xy = np.vstack([x, y])
-            kde = _gaussian_kde(xy, bw_method=smooth)
-            xmin, xmax = np.percentile(x, [0.5, 99.5])
-            ymin, ymax = np.percentile(y, [0.5, 99.5])
-            X, Y = np.meshgrid(
-                np.linspace(xmin, xmax, gridsize),
-                np.linspace(ymin, ymax, gridsize),
-            )
-            grid = np.vstack([X.ravel(), Y.ravel()])
-            Z = kde(grid).reshape(X.shape)
-            P = Z / Z.sum()
-            flat = P.ravel()
-            idx = np.argsort(flat)[::-1]
-            cumsum = np.cumsum(flat[idx])
-            thr = []
-            for a in levels:
-                k = np.searchsorted(cumsum, a)
-                t = flat[idx[k]] if k < len(flat) else flat[idx[-1]]
-                thr.append(t * Z.sum())
-            thr = np.sort(thr)
-            return X, Y, Z, thr
-
-        for r in range(d):
-            for c in range(d):
-                ax = axes[r, c]
-                if r == c:
-                    h_kwargs = dict(bins=50, density=True)
-                    ax.hist(
-                        post_plot[:, c],
-                        color="black",
-                        alpha=0.6,
-                        label="Posterior samples",
-                        **h_kwargs,
-                    )
-                    ax.hist(
-                        prop_plot[:, c],
-                        color="red",
-                        alpha=0.4,
-                        label="Morph samples",
-                        **h_kwargs,
-                    )
-                    for q in [0.05, 0.5, 0.95]:
-                        ax.axvline(np.quantile(post_plot[:, c], q), color="black", lw=1, alpha=0.7)
-                        ax.axvline(np.quantile(prop_plot[:, c], q), color="red", lw=1, alpha=0.6)
-                    med = np.quantile(post_plot[:, c], 0.5)
-                    ax.set_title(f"{med:.2f}", fontsize=6)
-                elif r > c:
-                    x_post, y_post = post_plot[:, c], post_plot[:, r]
-                    x_prop, y_prop = prop_plot[:, c], prop_plot[:, r]
-                    ax.scatter(x_post, y_post, s=3, c="black", alpha=0.15)
-                    ax.scatter(x_prop, y_prop, s=3, c="red", alpha=0.12)
-                    X, Y, Z, thr = _kde_contours(x_post, y_post)
-                    ax.contourf(X, Y, Z, levels=np.r_[0, thr], colors=["black"], alpha=0.05)
-                    ax.contour(X, Y, Z, levels=thr, colors="black", linewidths=0.8, alpha=0.6)
-                    X2, Y2, Z2, thr2 = _kde_contours(x_prop, y_prop)
-                    ax.contourf(X2, Y2, Z2, levels=np.r_[0, thr2], colors=["red"], alpha=0.04)
-                    ax.contour(X2, Y2, Z2, levels=thr2, colors="red", linewidths=0.8, alpha=0.6)
-                else:
-                    ax.set_visible(False)
-                    continue
-
-                if r == d - 1:
-                    ax.set_xlabel(names[c], fontsize=7)
-                else:
-                    ax.set_xticklabels([])
-                if c == 0:
-                    ax.set_ylabel(names[r], fontsize=7)
-                else:
-                    ax.set_yticklabels([])
-                ax.tick_params(labelsize=6)
-
-        legend_elems = [
-            Line2D([0], [0], marker="o", color="w", markerfacecolor="black", markersize=6, label="Posterior samples"),
-            Line2D([0], [0], marker="o", color="w", markerfacecolor="red", markersize=6, label="Morph samples"),
-        ]
-        fig.legend(handles=legend_elems, loc="upper right", frameon=False)
-        fig.tight_layout(rect=[0, 0, 0.96, 1])
-        corner_fname = os.path.join(output_path, f"corner_{morph_type}.png")
-        fig.savefig(corner_fname, dpi=150)
-        plt.close(fig)
+    except Exception as exc:
+        msg = f"Matplotlib is required to save corner plots: {exc}"
+        warnings.warn(msg, RuntimeWarning)
         if verbose:
-            logger.info("Saved corner plot (fallback) to %s", corner_fname)
-    except Exception as exc:  # pragma: no cover
+            logger.warning(msg)
+        return
+
+    try:
+        import corner as corner_lib  # type: ignore
+    except ImportError:
+        msg = "corner package is not installed; skipping corner plot."
+        warnings.warn(msg, RuntimeWarning)
         if verbose:
-            logger.warning("Corner plot generation failed: %s", exc)
+            logger.warning("%s (morph type: %s)", msg, morph_type)
+        return
+
+    def _downsample(arr: np.ndarray, max_points: int = 50000) -> np.ndarray:
+        n = arr.shape[0]
+        if n <= max_points:
+            return arr
+        idx = np.random.choice(n, size=max_points, replace=False)
+        return arr[idx]
+
+    post_plot = _downsample(posterior_samples)
+    prop_plot = _downsample(proposal_samples)
+    names = param_names if param_names is not None else [f"param_{j}" for j in range(post_plot.shape[1])]
+
+    fig = corner_lib.corner(
+        post_plot,
+        bins=50,
+        color="black",
+        labels=names,
+        label_kwargs={"fontsize": 7},
+        hist_kwargs={"density": True},
+        quantiles=[0.05, 0.5, 0.95],
+        show_titles=True,
+        title_fmt=".2f",
+        plot_datapoints=True,
+        fill_contours=True,
+        levels=(0.5, 0.8, 0.95),
+        smooth=0.9,
+        pcolor_kwargs=dict(alpha=0.06),
+        contour_kwargs=dict(alpha=0.4, colors=["black"]),
+    )
+    corner_lib.corner(
+        prop_plot,
+        bins=50,
+        color="red",
+        labels=names,
+        label_kwargs={"fontsize": 7},
+        hist_kwargs={"density": True},
+        quantiles=[0.05, 0.5, 0.95],
+        show_titles=True,
+        title_fmt=".2f",
+        plot_datapoints=True,
+        fill_contours=True,
+        levels=(0.5, 0.8, 0.95),
+        smooth=0.9,
+        pcolor_kwargs=dict(alpha=0.04),
+        contour_kwargs=dict(alpha=0.4, colors=["red"]),
+        fig=fig,
+    )
+
+    legend_elems = [
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="black", markersize=6, label="Posterior samples"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="red", markersize=6, label="Morph samples"),
+    ]
+    fig.legend(handles=legend_elems, loc="upper right", frameon=False)
+    fig.tight_layout(rect=[0, 0, 0.96, 1])
+    corner_fname = os.path.join(output_path, f"corner_{morph_type}.png")
+    fig.savefig(corner_fname, dpi=150)
+    plt.close(fig)
+    if verbose:
+        logger.info("Saved corner plot via 'corner' to %s", corner_fname)
 
 # ----- Typing helpers for better IDE hovers -----
 # Bandwidth methods supported by bw_method.py
@@ -242,7 +150,7 @@ def evidence(
     kde_fraction: float = 0.5,
     bridge_start_fraction: float = 0.5,
     max_iter: int = 50000,
-    tol: float = 1e-4,
+    tol: float = 1e-2,
     morph_type: MorphType = "indep",
     param_names: Optional[List[str]] = None,
     output_path: Optional[str] = None,
@@ -250,7 +158,7 @@ def evidence(
     kde_bw: Optional[Union[BandwidthMethod, float, Dict[str, float]]] = None,
     verbose: bool = False,
     top_k_greedy: int = None,
-    plot: bool = False,
+    plot: bool = True,
     prefer_corner: bool = True,
 ) -> List[List[float]]:
     """
@@ -306,13 +214,12 @@ def evidence(
         plot (bool): If True, saves a corner plot comparing posterior samples
             (black) and proposal samples (red) as a PNG in ``output_path``.
             The plot is not displayed.
-        prefer_corner (bool): If True and the ``corner`` package is available,
-            uses it to render the corner plot with filled contours and the
-            following style: ``bins=50``, ``quantiles=(0.05,0.5,0.95)``,
-            ``show_titles=True``, ``title_fmt='.2f'``, ``plot_datapoints=True``,
-            ``fill_contours=True``, ``levels=(0.5,0.8,0.95)``, ``smooth=0.9``.
-            Falls back to a Matplotlib implementation with similar aesthetics
-            (including 2D KDE contours) if ``corner`` is not installed.
+        prefer_corner (bool): If True, attempts to render the corner plot using
+            the ``corner`` package with filled contours and the following style:
+            ``bins=50``, ``quantiles=(0.05,0.5,0.95)``, ``show_titles=True``,
+            ``title_fmt='.2f'``, ``plot_datapoints=True``, ``fill_contours=True``,
+            ``levels=(0.5,0.8,0.95)``, ``smooth=0.9``. If ``corner`` is not
+            installed, a warning is emitted and the plot is skipped.
 
     Returns:
         list[[float, float]]: A list of ``[logz, err]`` for each estimation.
@@ -595,6 +502,8 @@ def evidence(
             verbose,
             prefer_corner,
         )
+    logz_path = f"{output_path}/logz_morph_z_{morph_type}_{kde_bw_name}.txt"
+    header = "logz err"
     all_log_z_results = []
     for i in range(n_estimations):
 
@@ -615,11 +524,14 @@ def evidence(
         )
         all_log_z_results.append(log_z_results)
 
+        # Persist partial results every iteration so progress survives interruptions.
+        row = np.array([log_z_results], dtype=float)
+        mode = "w" if i == 0 else "a"
+        with open(logz_path, mode, encoding="utf-8") as f:
+            if i == 0:
+                f.write(f"{header}\n")
+            np.savetxt(f, row, fmt="%f", comments="", delimiter=" ")
 
-    # Save log(z) and error
-    logz_path = f"{output_path}/logz_morph_z_{morph_type}_{kde_bw_name}.txt"
-    header = "logz err"
-    np.savetxt(logz_path, np.array(all_log_z_results), header=header, fmt='%f', comments='')
     final_msg = f"\nSaved log(z) to {logz_path}"
     print(final_msg)
     logger.debug(final_msg.strip())

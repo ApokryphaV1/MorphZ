@@ -124,7 +124,7 @@ Notes:
 
 ## Dependencies
 
-- Core: `numpy`, `scipy`, `matplotlib`, `networkx`, `emcee`, `statsmodels`, `scikit-learn`
+- Core: `numpy`, `scipy`, `matplotlib`, `corner`, `networkx`, `emcee`, `statsmodels`, `scikit-learn`
 - Optional: `pandas` (CSV labels), `pygraphviz` (nicer tree layout), `scikit-sparse` (optional exception type)
 
 ## Development
