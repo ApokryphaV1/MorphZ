@@ -95,21 +95,35 @@ def _robust_scale_1d(x: np.ndarray) -> float:
 
 
 def scott_factor(data: ArrayLike) -> float:
-    """Return SciPy-compatible Scott factor: n**(-1/(d+4))."""
+    """
+    Return the exact factor used by SciPy's gaussian_kde with bw_method='scott'.
+
+    This delegates to gaussian_kde(...).factor to ensure identical behavior
+    to the installed SciPy version. No fallback is provided; gaussian_kde is
+    required for this project.
+    """
     X = _to_2d(data)
     n, d = X.shape
     if n <= 1:
         raise ValueError("Need at least two samples to compute bandwidth.")
-    return float(n ** (-1.0 / (d + 4)))
+    kde = gaussian_kde(X.T, bw_method="scott")
+    return float(kde.factor)
 
 
 def silverman_factor(data: ArrayLike) -> float:
-    """Return SciPy-compatible Silverman factor: (n*(d+2)/4.)**(-1/(d+4))."""
+    """
+    Return the exact factor used by SciPy's gaussian_kde with bw_method='silverman'.
+
+    This delegates to gaussian_kde(...).factor to ensure identical behavior
+    to the installed SciPy version. No fallback is provided; gaussian_kde is
+    required for this project.
+    """
     X = _to_2d(data)
     n, d = X.shape
     if n <= 1:
         raise ValueError("Need at least two samples to compute bandwidth.")
-    return float((n * (d + 2) / 4.0) ** (-1.0 / (d + 4)))
+    kde = gaussian_kde(X.T, bw_method="silverman")
+    return float(kde.factor)
 
 
 # -------------------------
