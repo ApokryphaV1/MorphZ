@@ -248,14 +248,21 @@ def compute_and_save_tc(
         plot_tc_heatmap(mi_matrix, labels, outfile=heatmap_path)
 
         tri = np.triu_indices_from(mi_matrix, k=1)
-        all_pairs = sorted(zip(tri[0], tri[1], mi_matrix[tri]), key=lambda x: x[2], reverse=True)
+        all_pairs = []
+        for i, j in zip(tri[0], tri[1]):
+            # Traverse only the upper triangle to skip diagonals and duplicates
+            value = float(mi_matrix[i, j])
+            all_pairs.append((i, j, value))
+        all_pairs.sort(key=lambda x: x[2], reverse=True)
         
         logger.info("Top 10 MI pairs:")
         for i, j, val in all_pairs[:10]:
             logger.info("  %s — %s : %.6f", labels[i], labels[j], val)
 
         mi_path = p / f"params_{n_order}-order_TC.json"
-        mi_data = [[labels[i], labels[j], val] for i, j, val in all_pairs]
+        mi_data = [
+            [[labels[i], labels[j]], float(val)] for i, j, val in all_pairs
+        ]
         with open(mi_path, "w", encoding="utf8") as f:
             json.dump(mi_data, f, indent=2)
         logger.info("All MI pairs saved to %s", mi_path)

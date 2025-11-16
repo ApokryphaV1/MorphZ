@@ -77,15 +77,15 @@ def _save_corner_plot(
         idx = np.random.choice(n, size=max_points, replace=False)
         return arr[idx]
 
-    post_plot = _downsample(posterior_samples)
-    prop_plot = _downsample(proposal_samples)
-    names = param_names if param_names is not None else [f"param_{j}" for j in range(post_plot.shape[1])]
+    # post_plot = _downsample(posterior_samples)
+    # prop_plot = _downsample(proposal_samples)
+    # names = param_names if param_names is not None else [f"param_{j}" for j in range(post_plot.shape[1])]
 
     fig = corner_lib.corner(
-        post_plot,
-        bins=50,
+        posterior_samples[::2,:],
+        bins=20,
         color="black",
-        labels=names,
+        labels=param_names,
         label_kwargs={"fontsize": 7},
         hist_kwargs={"density": True},
         quantiles=[0.05, 0.5, 0.95],
@@ -99,10 +99,10 @@ def _save_corner_plot(
         contour_kwargs=dict(alpha=0.4, colors=["black"]),
     )
     corner_lib.corner(
-        prop_plot,
-        bins=50,
+        proposal_samples[::2,:],
+        bins=20,
         color="red",
-        labels=names,
+        labels=param_names,
         label_kwargs={"fontsize": 7},
         hist_kwargs={"density": True},
         quantiles=[0.05, 0.5, 0.95],
@@ -158,7 +158,7 @@ def evidence(
     kde_bw: Optional[Union[BandwidthMethod, float, Dict[str, float]]] = None,
     verbose: bool = False,
     top_k_greedy: int = None,
-    plot: bool = True,
+    plot: bool = False,
     prefer_corner: bool = True,
 ) -> List[List[float]]:
     """

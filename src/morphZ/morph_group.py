@@ -85,119 +85,153 @@ class Morph_Group(KDEBase):
             raise ValueError("Length of param_names must match number of columns in data.")
         self.param_names = [str(p) for p in param_names]
         self.param_map = {name: i for i, name in enumerate(self.param_names)}
+        def _to_name(x):
+            if isinstance(x, (int, np.integer)):
+                idx = int(x)
+                if idx < 0 or idx >= self.n_params:
+                    raise IndexError(f"Index {idx} out of bounds for param count {self.n_params}.")
+                return self.param_names[idx]
+            if isinstance(x, str):
+                if x not in self.param_map:
+                    raise KeyError(f"Parameter name {x!r} not found in param_names.")
+                return x
+            raise TypeError(f"Unsupported parameter identifier type: {type(x)}")
+
+        selection_loaded = False
+        raw_groups = None
         if isinstance(param_tc, str):
-            with open(param_tc, "r", encoding="utf-8") as f:
-                raw_groups = json.load(f)
+            param_tc_abs = os.path.abspath(param_tc)
+            base = os.path.basename(param_tc_abs)
+            dir_name = os.path.dirname(param_tc_abs)
+            m_preselect = re.search(r"params_(\d+)-order_TC\.json$", base)
+            if m_preselect:
+                n_order_str = m_preselect.group(1)
+                selected_path = os.path.join(dir_name, f"selected_{n_order_str}-order_group.json")
+                if os.path.isfile(selected_path):
+                    try:
+                        with open(selected_path, "r", encoding="utf-8") as f_sel:
+                            selection_payload = json.load(f_sel)
+                        groups_payload = selection_payload.get("groups")
+                        singles_payload = selection_payload.get("singles")
+                        if groups_payload is None or singles_payload is None:
+                            raise ValueError("Missing 'groups' or 'singles' in selection file.")
+                        restored_groups = []
+                        for entry in groups_payload:
+                            names_raw = entry.get("names", [])
+                            tc_val = float(entry.get("tc", 0.0))
+                            names_tuple = tuple(_to_name(name) for name in names_raw)
+                            restored_groups.append({"names": names_tuple, "tc": tc_val})
+                        restored_singles = [_to_name(name) for name in singles_payload]
+                        self.groups = restored_groups
+                        self.singles = list(restored_singles)
+                        selection_loaded = True
+                        if self.verbose:
+                            logger.info("Loaded selection from %s", selected_path)
+                    except Exception as exc:
+                        selection_loaded = False
+                        if self.verbose:
+                            logger.warning("Failed to load precomputed selection %s: %s", selected_path, exc)
+            if not selection_loaded:
+                with open(param_tc, "r", encoding="utf-8") as f:
+                    raw_groups = json.load(f)
         else:
             raw_groups = param_tc
-        
-        parsed = []
-        for entry in raw_groups:
-            # Accept both formats:
-            # 1) [["p1","p2"], tc]
-            # 2) ["p1","p2", tc]
-            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                raise ValueError("Each entry in param_tc must be a list/tuple with a group and a TC value.")
+        if not selection_loaded:
+            parsed = []
+            for entry in raw_groups:
+                # Accept both formats:
+                # 1) [["p1","p2"], tc]
+                # 2) ["p1","p2", tc]
+                if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                    raise ValueError("Each entry in param_tc must be a list/tuple with a group and a TC value.")
 
-            if len(entry) == 2 and isinstance(entry[0], (list, tuple)):
-                group, tc = entry[0], float(entry[1])
-            else:
-                # Assume last element is tc and preceding elements are names
-                group, tc = list(entry[:-1]), float(entry[-1])
+                if len(entry) == 2 and isinstance(entry[0], (list, tuple)):
+                    group, tc = entry[0], float(entry[1])
+                else:
+                    # Assume last element is tc and preceding elements are names
+                    group, tc = list(entry[:-1]), float(entry[-1])
 
-            if not isinstance(group, (list, tuple)):
-                raise ValueError("The group specification must be a list/tuple of parameter names/indices.")
-            parsed.append((group, tc))
+                if not isinstance(group, (list, tuple)):
+                    raise ValueError("The group specification must be a list/tuple of parameter names/indices.")
+                parsed.append((group, tc))
 
-        canonical = []
-        for group, tc in parsed:
-            def _to_name(x):
-                if isinstance(x, (int, np.integer)):
-                    idx = int(x)
-                    if idx < 0 or idx >= self.n_params:
-                        raise IndexError(f"Index {idx} out of bounds for param count {self.n_params}.")
-                    return self.param_names[idx]
-                if isinstance(x, str):
-                    if x not in self.param_map:
-                        raise KeyError(f"Parameter name {x!r} not found in param_names.")
-                    return x
-                raise TypeError(f"Unsupported parameter identifier type: {type(x)}")
+            canonical = []
+            for group, tc in parsed:
+                named_group = tuple(sorted([_to_name(p) for p in group]))
+                canonical.append((named_group, float(tc)))
+
+            if self.min_tc is not None:
+                canonical = [g for g in canonical if g[1] >= self.min_tc]
             
-            named_group = tuple(sorted([_to_name(p) for p in group]))
-            canonical.append((named_group, float(tc)))
+            canonical.sort(key=lambda t: -t[1])
 
-        if self.min_tc is not None:
-            canonical = [g for g in canonical if g[1] >= self.min_tc]
-        
-        canonical.sort(key=lambda t: -t[1])
+            # Helper to run one seeded greedy pass starting from seed_idx
+            def _run_seed(seed_idx: int):
+                pool = set(self.param_names)
+                selection = []  # list of dicts with {names, tc}
+                total = 0.0
+                if 0 <= seed_idx < len(canonical):
+                    names, tc = canonical[seed_idx]
+                    if all(name in pool for name in names):
+                        selection.append({"names": names, "tc": float(tc)})
+                        for n in names:
+                            pool.remove(n)
+                        total += float(tc)
+                for names, tc in canonical:
+                    if all(name in pool for name in names):
+                        selection.append({"names": names, "tc": float(tc)})
+                        for n in names:
+                            pool.remove(n)
+                        total += float(tc)
+                singles = sorted(pool)
+                return selection, singles, total
 
-        # Helper to run one seeded greedy pass starting from seed_idx
-        def _run_seed(seed_idx: int):
-            pool = set(self.param_names)
-            selection = []  # list of dicts with {names, tc}
-            total = 0.0
-            if 0 <= seed_idx < len(canonical):
-                names, tc = canonical[seed_idx]
-                if all(name in pool for name in names):
-                    selection.append({"names": names, "tc": float(tc)})
-                    for n in names:
-                        pool.remove(n)
-                    total += float(tc)
-            for names, tc in canonical:
-                if all(name in pool for name in names):
-                    selection.append({"names": names, "tc": float(tc)})
-                    for n in names:
-                        pool.remove(n)
-                    total += float(tc)
-            singles = sorted(pool)
-            return selection, singles, total
+            # Best-of-K seeded greedy
+            if self.top_k_greedy is None or self.top_k_greedy <= 1 or len(canonical) == 0:
+                pool = set(self.param_names)
+                self.groups = []
+                for names, tc in canonical:
+                    if all(name in pool for name in names):
+                        self.groups.append({"names": names, "tc": tc})
+                        for name in names:
+                            pool.remove(name)
+                        if self.verbose:
+                            logger.info("Selected group: %s (TC=%.4g)", ", ".join(names), tc)
 
-        # Best-of-K seeded greedy
-        if self.top_k_greedy is None or self.top_k_greedy <= 1 or len(canonical) == 0:
-            pool = set(self.param_names)
-            self.groups = []
-            for names, tc in canonical:
-                if all(name in pool for name in names):
-                    self.groups.append({"names": names, "tc": tc})
-                    for name in names:
-                        pool.remove(name)
-                    if self.verbose:
-                        logger.info("Selected group: %s (TC=%.4g)", ", ".join(names), tc)
-
-            self.singles = sorted(pool)
-            if self.verbose:
-                logger.info(
-                    "Groups selected (%s): %s",
-                    len(self.groups),
-                    [g["names"] for g in self.groups],
-                )
-                logger.info("Singles (%s): %s", len(self.singles), self.singles)
-        else:
-            K = min(int(self.top_k_greedy), len(canonical))
-            best_groups, best_singles = [], self.param_names[:]  # placeholders
-            best_key = None  # (total_tc, n_groups, -seed_idx) for max-compare
-            for seed_idx in range(K):
-                groups_i, singles_i, total_i = _run_seed(seed_idx)
-                key = (total_i, len(groups_i), -seed_idx)
-                if best_key is None or key > best_key:
-                    best_key = key
-                    best_groups, best_singles = groups_i, singles_i
-            self.groups, self.singles = best_groups, best_singles
-            if self.verbose:
-                total_best = best_key[0] if best_key is not None else 0.0
-                logger.info(
-                    "Best-of-%s seeded greedy total TC: %.4g; groups=%s",
-                    K,
-                    total_best,
-                    len(self.groups),
-                )
-                for g in self.groups:
+                self.singles = sorted(pool)
+                if self.verbose:
                     logger.info(
-                        "Selected group: %s (TC=%.4g)",
-                        ", ".join(g["names"]),
-                        g["tc"],
+                        "Groups selected (%s): %s",
+                        len(self.groups),
+                        [g["names"] for g in self.groups],
                     )
-                logger.info("Singles (%s): %s", len(self.singles), self.singles)
+                    logger.info("Singles (%s): %s", len(self.singles), self.singles)
+            else:
+                K = min(int(self.top_k_greedy), len(canonical))
+                best_groups, best_singles = [], self.param_names[:]  # placeholders
+                best_key = None  # (total_tc, n_groups, -seed_idx) for max-compare
+                for seed_idx in range(K):
+                    groups_i, singles_i, total_i = _run_seed(seed_idx)
+                    key = (total_i, len(groups_i), -seed_idx)
+                    if best_key is None or key > best_key:
+                        best_key = key
+                        best_groups, best_singles = groups_i, singles_i
+                self.groups, self.singles = best_groups, best_singles
+                if self.verbose:
+                    total_best = best_key[0] if best_key is not None else 0.0
+                    logger.info(
+                        "Best-of-%s seeded greedy total TC: %.4g; groups=%s",
+                        K,
+                        total_best,
+                        len(self.groups),
+                    )
+                    for g in self.groups:
+                        logger.info(
+                            "Selected group: %s (TC=%.4g)",
+                            ", ".join(g["names"]),
+                            g["tc"],
+                        )
+                    logger.info("Singles (%s): %s", len(self.singles), self.singles)
         # Save selection next to source TC JSON if available
         try:
             if isinstance(param_tc, str):
