@@ -149,7 +149,7 @@ def evidence(
     thin: int = 1,
     kde_fraction: float = 0.5,
     bridge_start_fraction: float = 0.5,
-    max_iter: int = 50000,
+    max_iter: int = 5000,
     tol: float = 1e-2,
     morph_type: MorphType = "indep",
     param_names: Optional[List[str]] = None,
@@ -521,6 +521,7 @@ def evidence(
             tol=tol,
             max_iter=max_iter,
             estimation_label=estimation_label,
+            verbose=verbose,
         )
         all_log_z_results.append(log_z_results)
 

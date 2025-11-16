@@ -15,9 +15,10 @@ def bridge_sampling_ln(
     samples_post,
     log_post,
     samples_prop,
-    tol=1e-4,
-    max_iter=40000,
+    tol=1e-2,
+    max_iter=5000,
     estimation_label: Optional[str] = None,
+    verbose: bool = False,
 ):
     """
     Estimate log marginal likelihood log p(y) using bridge sampling in log space.
@@ -64,6 +65,7 @@ def bridge_sampling_ln(
             # Only append if the evaluation is successful
             successful_samples.append(theta)
             log_f_prop_results.append(result)
+            print(f"Number of evaluated proposed samples: {i + 1}/{num_samples}", end="\r")
         except Exception:
             # If f(theta) fails, increment counter and skip this sample
             failure_count += 1
@@ -128,6 +130,8 @@ def bridge_sampling_ln(
 
         log_p_new = log_num - log_den
         last_iteration_msg = f"iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}"
+        if verbose : 
+            print(last_iteration_msg,end="\r")
         logger.info(last_iteration_msg)
         # Check convergence:
         if np.abs(log_p_new - log_p_old) < tol:
