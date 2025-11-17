@@ -29,7 +29,8 @@ from . import dependency_tree
 from .morph_group import Morph_Group
 from . import Nth_TC
 from .bw_method import compute_and_save_bandwidths
-from .bridge import bridge_sampling_ln, compute_bridge_rmse
+from . import bridge as bridge_serial
+from . import bridge_multiprocess
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ def evidence(
     top_k_greedy: int = None,
     plot: bool = False,
     prefer_corner: bool = True,
+    pool: Optional[Union[int, str]] = None,
 ) -> List[List[float]]:
     """
     Compute log evidence using morphological bridge sampling with KDE proposals.
@@ -220,6 +222,10 @@ def evidence(
             ``title_fmt='.2f'``, ``plot_datapoints=True``, ``fill_contours=True``,
             ``levels=(0.5,0.8,0.95)``, ``smooth=0.9``. If ``corner`` is not
             installed, a warning is emitted and the plot is skipped.
+        pool (int | "max" | None): Worker processes for evaluating proposal
+            samples during bridge sampling. Use ``"max"`` to match
+            ``os.cpu_count()``. When ``None`` or ``<=1`` evaluations run
+            serially.
 
     Returns:
         list[[float, float]]: A list of ``[logz, err]`` for each estimation.
@@ -502,6 +508,26 @@ def evidence(
             verbose,
             prefer_corner,
         )
+    resolved_pool = None
+    if pool is not None:
+        if isinstance(pool, str):
+            if pool.lower() == "max":
+                resolved_pool = os.cpu_count() or 1
+                logger.info("Resolving pool='max' to %s workers via os.cpu_count().", resolved_pool)
+            else:
+                raise ValueError("pool expects an int, None, or the string 'max'.")
+        else:
+            resolved_pool = pool
+
+    use_pool = resolved_pool is not None and resolved_pool > 1
+    bridge_impl = bridge_multiprocess.bridge_sampling_ln if use_pool else bridge_serial.bridge_sampling_ln
+    bridge_kwargs = {"num_workers": resolved_pool} if use_pool else {}
+    if resolved_pool is not None:
+        if use_pool:
+            logger.info("Using multiprocessing with %s workers for bridge sampling.", resolved_pool)
+        else:
+            logger.info("Multiprocessing requested with pool size %s; running serial evaluation.", resolved_pool)
+
     logz_path = f"{output_path}/logz_morph_z_{morph_type}_{kde_bw_name}.txt"
     header = "logz err"
     all_log_z_results = []
@@ -512,7 +538,7 @@ def evidence(
         if i > 0:
             print()
         logger.debug(estimation_label)
-        log_z_results = bridge_sampling_ln(
+        log_z_results = bridge_impl(
             log_posterior_function,
             log_proposal_pdf,
             samples_mor,
@@ -522,6 +548,7 @@ def evidence(
             max_iter=max_iter,
             estimation_label=estimation_label,
             verbose=verbose,
+            **bridge_kwargs,
         )
         all_log_z_results.append(log_z_results)
 
