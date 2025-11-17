@@ -1,6 +1,8 @@
 import logging
 import multiprocessing as mp
+import os
 import pickle
+from functools import partial
 from typing import Optional
 
 import numpy as np
@@ -9,23 +11,6 @@ from scipy.special import logsumexp
 from . import utils
 
 logger = logging.getLogger(__name__)
-
-
-_MP_F_TARGET = None
-
-
-def _pool_initializer(func):
-    global _MP_F_TARGET
-    _MP_F_TARGET = func
-
-
-def _pool_eval(task):
-    idx, theta = task
-    try:
-        value = _MP_F_TARGET(theta)
-        return idx, value, None
-    except Exception as exc:  # pragma: no cover - propagated to main for accounting.
-        return idx, None, repr(exc)
 
 
 def _ensure_picklable(obj):
@@ -37,24 +22,105 @@ def _ensure_picklable(obj):
         ) from exc
 
 
-def _evaluate_samples_parallel(f, samples_prop, num_workers, logger):
+def _pool_eval_callable(task, func):
+    idx, theta = task
+    try:
+        value = func(theta)
+        return idx, value, None
+    except Exception as exc:  # pragma: no cover - propagated to main for accounting.
+        return idx, None, repr(exc)
+
+
+def _resolve_worker_count(requested_workers, num_samples, ctx):
+    available = ctx.cpu_count() if hasattr(ctx, "cpu_count") else mp.cpu_count()
+    worker_count = requested_workers if requested_workers and requested_workers > 0 else available
+    return max(1, min(worker_count, num_samples))
+
+
+def _evaluate_samples_serial(f, samples_prop, logger):
+    success_pairs = []
+    failure_count = 0
+    num_samples = len(samples_prop)
+    for i, theta in enumerate(samples_prop):
+        try:
+            result = f(theta)
+            success_pairs.append((i, result))
+            print(f"Number of evaluated proposed samples: {i + 1}/{num_samples}", end="\r")
+        except Exception:
+            failure_count += 1
+            continue
+        finally:
+            logger.debug("Evaluating target distribution: %s/%s", i + 1, num_samples)
+
+    success_pairs.sort(key=lambda pair: pair[0])
+    successful_samples = [samples_prop[idx] for idx, _ in success_pairs]
+    log_f_prop_results = [value for _, value in success_pairs]
+    return successful_samples, log_f_prop_results, failure_count
+
+
+def _evaluate_samples_parallel(f, samples_prop, pool_spec, logger):
     num_samples = len(samples_prop)
     if num_samples == 0:
         return [], [], 0
+    if pool_spec is None or (isinstance(pool_spec, int) and pool_spec <= 1):
+        return _evaluate_samples_serial(f, samples_prop, logger)
 
-    _ensure_picklable(f)
     ctx = mp.get_context("spawn")
-    available = ctx.cpu_count() if hasattr(ctx, "cpu_count") else mp.cpu_count()
-    worker_count = num_workers if num_workers and num_workers > 0 else available
-    worker_count = max(1, min(worker_count, num_samples))
-    chunk = max(1, num_samples // (worker_count * 4)) if num_samples > worker_count else 1
+    owns_pool = False
+    pool = None
+    chunk = None
+
+    if isinstance(pool_spec, int):
+        worker_count = _resolve_worker_count(pool_spec, num_samples, ctx)
+        if worker_count <= 1:
+            return _evaluate_samples_serial(f, samples_prop, logger)
+        _ensure_picklable(f)
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        pool = ctx.Pool(processes=worker_count)
+        owns_pool = True
+        chunk = max(1, num_samples // (worker_count * 4)) if num_samples > worker_count else 1
+        logger.info("Using internal multiprocessing pool with %s workers for bridge sampling.", worker_count)
+    elif hasattr(pool_spec, "map"):
+        pool = pool_spec
+        worker_hint = None
+        for attr in ("processes", "num_workers", "nthreads", "size"):
+            worker_hint = getattr(pool, attr, None)
+            if worker_hint:
+                break
+        if worker_hint:
+            logger.info(
+                "Using external pool (%s) with %s workers for bridge sampling.",
+                type(pool).__name__,
+                worker_hint,
+            )
+        else:
+            logger.info("Using external pool (%s) for bridge sampling.", type(pool).__name__)
+    else:  # pragma: no cover - defensive programming for user inputs.
+        raise TypeError("pool must be None, int, or an object with a .map method")
 
     success_pairs = []
     failure_count = 0
     processed = 0
+    eval_func = partial(_pool_eval_callable, func=f)
+    tasks = enumerate(samples_prop)
 
-    with ctx.Pool(processes=worker_count, initializer=_pool_initializer, initargs=(f,)) as pool:
-        for idx, value, error_msg in pool.imap_unordered(_pool_eval, enumerate(samples_prop), chunksize=chunk):
+    try:
+        mapper = getattr(pool, "imap_unordered", None)
+        if callable(mapper):
+            if owns_pool and chunk:
+                results_iter = mapper(eval_func, tasks, chunksize=chunk)
+            else:
+                results_iter = mapper(eval_func, tasks)
+        else:
+            map_func = getattr(pool, "map", None)
+            if map_func is None:  # pragma: no cover - contract requires map
+                raise TypeError("Provided pool must implement a map method.")
+            if owns_pool and chunk:
+                results_iter = map_func(eval_func, tasks, chunk)
+            else:
+                results_iter = map_func(eval_func, tasks)
+
+        for idx, value, error_msg in results_iter:
             processed += 1
             print(f"Number of evaluated proposed samples: {processed}/{num_samples}", end="\r")
             logger.debug("Evaluating target distribution: %s/%s", processed, num_samples)
@@ -62,6 +128,10 @@ def _evaluate_samples_parallel(f, samples_prop, num_workers, logger):
                 success_pairs.append((idx, value))
             else:
                 failure_count += 1
+    finally:
+        if owns_pool:
+            pool.close()
+            pool.join()
 
     success_pairs.sort(key=lambda pair: pair[0])
     successful_samples = [samples_prop[idx] for idx, _ in success_pairs]
@@ -80,6 +150,7 @@ def bridge_sampling_ln(
     max_iter=5000,
     estimation_label: Optional[str] = None,
     verbose: bool = False,
+    pool=None,
     num_workers: Optional[int] = None,
 ):
     """
@@ -100,6 +171,12 @@ def bridge_sampling_ln(
         tol (float): Convergence tolerance on successive log‑evidence updates.
             Smaller values increase accuracy but may require more iterations.
         max_iter (int): Maximum number of bridge iterations.
+        pool: Optional parallel pool. Accepts:
+            - None: run serially.
+            - int: create an internal multiprocessing pool with that many workers.
+            - any object with a ``map`` method: treated as an external pool.
+        num_workers (Optional[int]): Deprecated alias for ``pool`` kept for
+            backward compatibility.
 
     Returns:
         list[float, float]: ``[log_evidence, rmse_estimate]`` where the second
@@ -111,37 +188,19 @@ def bridge_sampling_ln(
         - Use a moderate ``tol`` (1e‑4 to 1e‑3) and cap ``max_iter`` to prevent
           long runs on difficult posteriors.
     """
+    if pool is not None and num_workers is not None:
+        logger.warning("Both pool and num_workers were provided; using pool and ignoring num_workers.")
 
     # Compute logs of densities for posterior samples
     log_f_post = log_post
     log_g_post = g(samples_post.T)
 
     # Compute logs of densities for proposal samples
-    successful_samples = []
-    log_f_prop_results = []
-    failure_count = 0
     num_samples = len(samples_prop)
-    if num_workers is None or num_workers <= 1:
-        for i, theta in enumerate(samples_prop):
-            try:
-                result = f(theta)
-                # Only append if the evaluation is successful
-                successful_samples.append(theta)
-                log_f_prop_results.append(result)
-                print(f"Number of evaluated proposed samples: {i + 1}/{num_samples}", end="\r")
-            except Exception:
-                # If f(theta) fails, increment counter and skip this sample
-                failure_count += 1
-                continue
-            finally:
-                # Ensure progress is always updated
-                logger.debug("Evaluating target distribution: %s/%s", i + 1, num_samples)
-    else:
-        parallel_results, parallel_log_values, failure_count = _evaluate_samples_parallel(
-            f, samples_prop, num_workers, logger
-        )
-        successful_samples.extend(parallel_results)
-        log_f_prop_results.extend(parallel_log_values)
+    pool_spec = pool if pool is not None else num_workers
+    successful_samples, log_f_prop_results, failure_count = _evaluate_samples_parallel(
+        f, samples_prop, pool_spec, logger
+    )
 
     # Rebuild arrays from the lists of successful evaluations
     samples_prop = np.array(successful_samples)

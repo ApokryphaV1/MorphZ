@@ -515,18 +515,30 @@ def evidence(
                 resolved_pool = os.cpu_count() or 1
                 logger.info("Resolving pool='max' to %s workers via os.cpu_count().", resolved_pool)
             else:
-                raise ValueError("pool expects an int, None, or the string 'max'.")
-        else:
+                raise ValueError("pool expects an int, None, an object with a map method, or the string 'max'.")
+        elif isinstance(pool, int):
             resolved_pool = pool
-
-    use_pool = resolved_pool is not None and resolved_pool > 1
-    bridge_impl = bridge_multiprocess.bridge_sampling_ln if use_pool else bridge_serial.bridge_sampling_ln
-    bridge_kwargs = {"num_workers": resolved_pool} if use_pool else {}
-    if resolved_pool is not None:
-        if use_pool:
-            logger.info("Using multiprocessing with %s workers for bridge sampling.", resolved_pool)
+        elif hasattr(pool, "map"):
+            resolved_pool = pool
         else:
-            logger.info("Multiprocessing requested with pool size %s; running serial evaluation.", resolved_pool)
+            raise ValueError("pool expects an int, None, an object with a map method, or the string 'max'.")
+
+    use_pool = False
+    if isinstance(resolved_pool, int):
+        use_pool = resolved_pool > 1
+    elif resolved_pool is not None:
+        use_pool = True
+
+    bridge_impl = bridge_multiprocess.bridge_sampling_ln if use_pool else bridge_serial.bridge_sampling_ln
+    bridge_kwargs = {"pool": resolved_pool} if use_pool else {}
+    if resolved_pool is not None:
+        if isinstance(resolved_pool, int):
+            if use_pool:
+                logger.info("Using multiprocessing with %s workers for bridge sampling.", resolved_pool)
+            else:
+                logger.info("Multiprocessing requested with pool size %s; running serial evaluation.", resolved_pool)
+        else:
+            logger.info("Using external pool (%s) for bridge sampling.", type(resolved_pool).__name__)
 
     logz_path = f"{output_path}/logz_morph_z_{morph_type}_{kde_bw_name}.txt"
     header = "logz err"

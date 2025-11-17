@@ -78,6 +78,7 @@ End‑to‑end morphological evidence with bridge sampling:
 
 ```python
 import numpy as np
+from multiprocessing import Pool
 from morphZ import evidence
 
 rng = np.random.default_rng(0)
@@ -102,12 +103,25 @@ results = evidence(
     output_path="examples/morphZ_gaussian_demo",
     n_estimations=2,
     verbose=True,
+    # Parallelization follows the emcee/pocoMC pool contract:
+    # - None: serial (default)
+    # - int: internal multiprocessing pool with that many workers
+    # - pool-like with .map: external pool, lifecycle owned by the caller
+    pool=None,
 )
 
 print("log(z), err per run:\n", np.array(results))
 ```
 
 Artifacts will be saved under `examples/morphZ_gaussian_demo/` (bandwidths, MI/Tree files as needed, and `logz_morph_z_<morph_type>_<bw_method>.txt`).
+
+To use an external pool (e.g., `multiprocessing.Pool`) wrap your call:
+
+```python
+with Pool() as p:
+    results = evidence(..., pool=p)
+```
+If you pass `pool="max"` the library resolves it to `os.cpu_count()` workers; if you pass an int it creates an internal pool and cleans it up automatically.
 
 ## API Highlights
 
