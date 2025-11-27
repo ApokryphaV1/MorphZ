@@ -19,6 +19,10 @@ venv/
 .coverage
 coverage.xml
 
+# Docs build artifacts
+docs/_auto/
+docs/_build/
+
 # OS / editor
 .DS_Store
 *.swp
