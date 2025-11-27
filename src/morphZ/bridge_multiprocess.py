@@ -13,6 +13,12 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+def _maybe_print(message: str = "", *, verbose: bool = False, **kwargs) -> None:
+    """Print helper that honors the verbose flag."""
+    if verbose:
+        print(message, **kwargs)
+
+
 def _ensure_picklable(obj):
     try:
         pickle.dumps(obj)
@@ -37,7 +43,7 @@ def _resolve_worker_count(requested_workers, num_samples, ctx):
     return max(1, min(worker_count, num_samples))
 
 
-def _evaluate_samples_serial(f, samples_prop, logger):
+def _evaluate_samples_serial(f, samples_prop, logger, verbose: bool = False):
     success_pairs = []
     failure_count = 0
     num_samples = len(samples_prop)
@@ -45,7 +51,11 @@ def _evaluate_samples_serial(f, samples_prop, logger):
         try:
             result = f(theta)
             success_pairs.append((i, result))
-            print(f"Number of evaluated proposed samples: {i + 1}/{num_samples}", end="\r")
+            _maybe_print(
+                f"Number of evaluated proposed samples: {i + 1}/{num_samples}",
+                verbose=verbose,
+                end="\r",
+            )
         except Exception:
             failure_count += 1
             continue
@@ -58,12 +68,12 @@ def _evaluate_samples_serial(f, samples_prop, logger):
     return successful_samples, log_f_prop_results, failure_count
 
 
-def _evaluate_samples_parallel(f, samples_prop, pool_spec, logger):
+def _evaluate_samples_parallel(f, samples_prop, pool_spec, logger, verbose: bool = False):
     num_samples = len(samples_prop)
     if num_samples == 0:
         return [], [], 0
     if pool_spec is None or (isinstance(pool_spec, int) and pool_spec <= 1):
-        return _evaluate_samples_serial(f, samples_prop, logger)
+        return _evaluate_samples_serial(f, samples_prop, logger, verbose=verbose)
 
     ctx = mp.get_context("spawn")
     owns_pool = False
@@ -73,7 +83,7 @@ def _evaluate_samples_parallel(f, samples_prop, pool_spec, logger):
     if isinstance(pool_spec, int):
         worker_count = _resolve_worker_count(pool_spec, num_samples, ctx)
         if worker_count <= 1:
-            return _evaluate_samples_serial(f, samples_prop, logger)
+            return _evaluate_samples_serial(f, samples_prop, logger, verbose=verbose)
         _ensure_picklable(f)
         os.environ.setdefault("OMP_NUM_THREADS", "1")
         pool = ctx.Pool(processes=worker_count)
@@ -122,7 +132,11 @@ def _evaluate_samples_parallel(f, samples_prop, pool_spec, logger):
 
         for idx, value, error_msg in results_iter:
             processed += 1
-            print(f"Number of evaluated proposed samples: {processed}/{num_samples}", end="\r")
+            _maybe_print(
+                f"Number of evaluated proposed samples: {processed}/{num_samples}",
+                verbose=verbose,
+                end="\r",
+            )
             logger.debug("Evaluating target distribution: %s/%s", processed, num_samples)
             if error_msg is None:
                 success_pairs.append((idx, value))
@@ -199,7 +213,7 @@ def bridge_sampling_ln(
     num_samples = len(samples_prop)
     pool_spec = pool if pool is not None else num_workers
     successful_samples, log_f_prop_results, failure_count = _evaluate_samples_parallel(
-        f, samples_prop, pool_spec, logger
+        f, samples_prop, pool_spec, logger, verbose=verbose
     )
 
     # Rebuild arrays from the lists of successful evaluations
@@ -219,7 +233,7 @@ def bridge_sampling_ln(
     message = (
         f"Filtered proposal samples: {len(samples_prop)} valid samples out of {num_samples} total samples."
     )
-    print(message)
+    _maybe_print(message, verbose=verbose)
     logger.info(message)
     # Now compute log_g for the filtered samples. g expects (n_dims, n_samples)
     log_g_prop = g(samples_prop.T)
@@ -229,7 +243,7 @@ def bridge_sampling_ln(
 
     if N2 == 0:
         warning_msg = "No valid samples from the proposal distribution. Bridge sampling failed."
-        print(f"\n{warning_msg}")
+        _maybe_print(f"\n{warning_msg}", verbose=verbose)
         logger.warning(warning_msg)
         return [np.nan, np.nan]
 
@@ -258,8 +272,8 @@ def bridge_sampling_ln(
 
         log_p_new = log_num - log_den
         last_iteration_msg = f"iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}"
-        if verbose : 
-            print(last_iteration_msg,end="\r")
+        if verbose:
+            print(last_iteration_msg, end="\r")
         logger.info(last_iteration_msg)
         # Check convergence:
         if np.abs(log_p_new - log_p_old) < tol:
@@ -278,14 +292,15 @@ def bridge_sampling_ln(
                 s2,
             )
             success_msg = f"Converged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}"
-            if estimation_label is not None:
-                block = "\n".join(
-                    line for line in (estimation_label, last_iteration_msg, success_msg) if line
-                )
-                print(block)
-            else:
-                print(last_iteration_msg)
-                print(success_msg)
+            if verbose:
+                if estimation_label is not None:
+                    block = "\n".join(
+                        line for line in (estimation_label, last_iteration_msg, success_msg) if line
+                    )
+                    _maybe_print(block, verbose=True)
+                else:
+                    _maybe_print(last_iteration_msg, verbose=True)
+                    _maybe_print(success_msg, verbose=True)
             logger.info(
                 "Converged in %s iterations. log(z): %.4f +/-: %.4f",
                 t + 1,
@@ -312,15 +327,16 @@ def bridge_sampling_ln(
     )
     failure_msg = f"Convergence not reached within {max_iter} iterations."
     final_msg = f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}"
-    if estimation_label is not None:
-        block_lines = [estimation_label]
-        if last_iteration_msg:
-            block_lines.append(last_iteration_msg)
-        block_lines.extend([failure_msg, final_msg])
-        print("\n".join(block_lines))
-    else:
-        print(failure_msg)
-        print(final_msg)
+    if verbose:
+        if estimation_label is not None:
+            block_lines = [estimation_label]
+            if last_iteration_msg:
+                block_lines.append(last_iteration_msg)
+            block_lines.extend([failure_msg, final_msg])
+            _maybe_print("\n".join(block_lines), verbose=True)
+        else:
+            _maybe_print(failure_msg, verbose=True)
+            _maybe_print(final_msg, verbose=True)
     logger.warning("Convergence not reached within %s iterations.", max_iter)
     logger.info("Final log(z): %.4f +/-: %.4f", log_p_final, rmse_est)
 

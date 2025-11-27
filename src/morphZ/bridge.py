@@ -9,6 +9,12 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+def _maybe_print(message: str = "", *, verbose: bool = False, **kwargs) -> None:
+    """Print helper that honors the verbose flag."""
+    if verbose:
+        print(message, **kwargs)
+
+
 def bridge_sampling_ln(
     f,
     g,
@@ -65,7 +71,11 @@ def bridge_sampling_ln(
             # Only append if the evaluation is successful
             successful_samples.append(theta)
             log_f_prop_results.append(result)
-            print(f"Number of evaluated proposed samples: {i + 1}/{num_samples}", end="\r")
+            _maybe_print(
+                f"Number of evaluated proposed samples: {i + 1}/{num_samples}",
+                verbose=verbose,
+                end="\r",
+            )
         except Exception:
             # If f(theta) fails, increment counter and skip this sample
             failure_count += 1
@@ -91,7 +101,7 @@ def bridge_sampling_ln(
     message = (
         f"Filtered proposal samples: {len(samples_prop)} valid samples out of {num_samples} total samples."
     )
-    print(message)
+    _maybe_print(message, verbose=verbose)
     logger.info(message)
     # Now compute log_g for the filtered samples. g expects (n_dims, n_samples)
     log_g_prop = g(samples_prop.T)
@@ -101,7 +111,7 @@ def bridge_sampling_ln(
 
     if N2 == 0:
         warning_msg = "No valid samples from the proposal distribution. Bridge sampling failed."
-        print(f"\n{warning_msg}")
+        _maybe_print(f"\n{warning_msg}", verbose=verbose)
         logger.warning(warning_msg)
         return [np.nan, np.nan]
 
@@ -130,8 +140,8 @@ def bridge_sampling_ln(
 
         log_p_new = log_num - log_den
         last_iteration_msg = f"iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}"
-        if verbose : 
-            print(last_iteration_msg,end="\r")
+        if verbose:
+            print(last_iteration_msg, end="\r")
         logger.info(last_iteration_msg)
         # Check convergence:
         if np.abs(log_p_new - log_p_old) < tol:
@@ -150,14 +160,15 @@ def bridge_sampling_ln(
                 s2,
             )
             success_msg = f"Converged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}"
-            if estimation_label is not None:
-                block = "\n".join(
-                    line for line in (estimation_label, last_iteration_msg, success_msg) if line
-                )
-                print(block)
-            else:
-                print(last_iteration_msg)
-                print(success_msg)
+            if verbose:
+                if estimation_label is not None:
+                    block = "\n".join(
+                        line for line in (estimation_label, last_iteration_msg, success_msg) if line
+                    )
+                    _maybe_print(block, verbose=True)
+                else:
+                    _maybe_print(last_iteration_msg, verbose=True)
+                    _maybe_print(success_msg, verbose=True)
             logger.info(
                 "Converged in %s iterations. log(z): %.4f +/-: %.4f",
                 t + 1,
@@ -184,15 +195,16 @@ def bridge_sampling_ln(
     )
     failure_msg = f"Convergence not reached within {max_iter} iterations."
     final_msg = f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}"
-    if estimation_label is not None:
-        block_lines = [estimation_label]
-        if last_iteration_msg:
-            block_lines.append(last_iteration_msg)
-        block_lines.extend([failure_msg, final_msg])
-        print("\n".join(block_lines))
-    else:
-        print(failure_msg)
-        print(final_msg)
+    if verbose:
+        if estimation_label is not None:
+            block_lines = [estimation_label]
+            if last_iteration_msg:
+                block_lines.append(last_iteration_msg)
+            block_lines.extend([failure_msg, final_msg])
+            _maybe_print("\n".join(block_lines), verbose=True)
+        else:
+            _maybe_print(failure_msg, verbose=True)
+            _maybe_print(final_msg, verbose=True)
     logger.warning("Convergence not reached within %s iterations.", max_iter)
     logger.info("Final log(z): %.4f +/-: %.4f", log_p_final, rmse_est)
 

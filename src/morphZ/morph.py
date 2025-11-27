@@ -547,7 +547,7 @@ def evidence(
 
         samples_prop = target_kde.resample(n_resamples)
         estimation_label = f"Estimation {i+1}/{n_estimations}"
-        if i > 0:
+        if verbose and i > 0:
             print()
         logger.debug(estimation_label)
         log_z_results = bridge_impl(
@@ -573,7 +573,8 @@ def evidence(
             np.savetxt(f, row, fmt="%f", comments="", delimiter=" ")
 
     final_msg = f"\nSaved log(z) to {logz_path}"
-    print(final_msg)
+    if verbose:
+        print(final_msg)
     logger.debug(final_msg.strip())
 
     return all_log_z_results
