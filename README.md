@@ -1,8 +1,8 @@
 ## MorphZ
 
-Morph-Z for high accuracy marginal likelihood estimation and morphological density approximation toolkit for scientific workflows, with utilities for dependency analysis.
+MorphZ for high accuracy marginal likelihood estimation and morphological density approximation toolkit for scientific workflows, with utilities for dependency analysis.
 
-- Flexible Morph backends: independent, pairwise, grouped, and tree-structured.
+- Flexible Morph backends: independent, pairwise, grouped, and "tree-structured".
 - Bandwidth selection: Scott, Silverman, Botev ISJ, and cross-validation variants.
 - Evidence estimation via bridge sampling with robust diagnostics.
 - Mutual information and Total correlation estimation.
@@ -74,7 +74,7 @@ Nth_TC.compute_and_save_tc(
 )
 ```
 
-End‑to‑end morphological evidence with bridge sampling:
+MorphZ evidence estimation using groups:
 
 ```python
 import numpy as np
@@ -97,8 +97,8 @@ results = evidence(
     log_posterior_values=log_post_vals,
     log_posterior_function=log_target,
     n_resamples=2000,
-    morph_type="tree",          # "indep" | "pair" | "tree" | "3_group" | ...
-    kde_bw="isj",             # "scott" | "silverman" | "isj" | "cv_iso" | "cv_diag" | numeric
+    morph_type="2_group",          # "indep" | "pair" | "tree" | "3_group" | ...
+    kde_bw="silverman",             # "scott" | "silverman" | "isj" | "cv_iso" | "cv_diag" | numeric
     param_names=[f"x{i}" for i in range(dim)],
     output_path="examples/morphZ_gaussian_demo",
     n_estimations=2,
@@ -139,7 +139,7 @@ GitHub Pages automatically on pushes to `main`.
 
 ## API Highlights
 
-- Morphs: `Morph_Indep`, `Morph_Pairwise`, `Morph_Tree`, `Morph_Group`.
+- Morphs: `Morph_Indep`, `Morph_Pairwise`, `Morph_Group`, `Morph_Tree`.
 - Bandwidths: `select_bandwidth`, `compute_and_save_bandwidths`.
 - Evidence: `evidence`, `bridge_sampling_ln` (lower‑level), `compute_bridge_rmse`.
 - Dependency analysis: `dependency_tree.compute_and_plot_mi_tree`.
@@ -148,7 +148,7 @@ GitHub Pages automatically on pushes to `main`.
 Notes:
 
 - If you pass a numeric `kde_bw` (e.g., `0.9`) the library skips bandwidth JSONs.
-- Tree/group proposals will compute and cache `tree.json`/`params_*_TC.json` on first use.
+- pair/group proposals will compute and cache `MI.json`/`params_*_TC.json` on first use.
 
 ## Dependencies
 
