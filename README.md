@@ -123,6 +123,20 @@ with Pool() as p:
 ```
 If you pass `pool="max"` the library resolves it to `os.cpu_count()` workers; if you pass an int it creates an internal pool and cleans it up automatically.
 
+## Documentation
+
+Jupyter Book powers the project docs. During each build the helper script copies
+`README.md` and the contents of `examples/` into `docs/_auto/` so that the book
+always reflects the latest files without committing the generated copies.
+
+```bash
+python -m pip install jupyter-book
+./docs/build_docs.sh
+```
+
+HTML output is written to `docs/_build/html`, and GitHub Actions publishes it to
+GitHub Pages automatically on pushes to `main`.
+
 ## API Highlights
 
 - Morphs: `Morph_Indep`, `Morph_Pairwise`, `Morph_Tree`, `Morph_Group`.

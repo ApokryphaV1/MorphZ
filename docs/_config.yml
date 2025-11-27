@@ -1,0 +1,18 @@
+# Book settings
+title: MorphZ Documentation
+author: MorphZ Contributors
+copyright: ""
+
+only_build_toc_files: true
+
+execute:
+  execute_notebooks: "off"
+
+repository:
+  url: https://github.com/ApokryphaV1/MorphZ
+  path_to_book: docs
+  branch: main
+
+html:
+  favicon: ""
+  use_repository_button: true

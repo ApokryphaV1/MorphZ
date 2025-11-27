@@ -1,0 +1,12 @@
+format: jb-book
+root: index
+chapters:
+  - file: getting_started
+  - file: examples
+    sections:
+      - file: _auto/examples/eggbox
+        title: Eggbox notebook
+      - file: _auto/examples/gaussian_shell
+        title: Gaussian shell notebook
+      - file: _auto/examples/peak_sampling_new
+        title: Peak sampling notebook
