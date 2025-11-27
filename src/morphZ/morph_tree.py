@@ -2,7 +2,7 @@ import numpy as np
 from scipy.stats import gaussian_kde
 import json
 import emcee
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Optional
 from .kde_base import KDEBase
 
 
@@ -12,7 +12,7 @@ class Morph_Tree(KDEBase):
     The joint PDF is approximated as a product of conditional probabilities based on the tree structure.
     p(x_1, ..., x_n) ≈ p(x_root) * product_{i in children} p(x_i | x_parent(i))
     """
-    def __init__(self, data, tree_file, param_names=None, kde_bw='silverman', bw_json_path=None, bw_method=None):
+    def __init__(self, data, tree_file, param_names=None, kde_bw='silverman', bw_json_path=None, bw_method=None, verbose: bool = True):
         """
         Initializes the Morph_Tree object by building the KDEs based on the provided tree structure.
 
@@ -27,6 +27,7 @@ class Morph_Tree(KDEBase):
                                          bandwidths will be loaded from this file and kde_bw can be used
                                          to override specific parameters.
             bw_method (str, scalar, or dict, optional): Backward‑compat alias for ``kde_bw``.
+            verbose (bool, optional): When True, emit setup info and sampling warnings.
         
         Suggestions:
             - Generate ``tree_file`` via ``dependency_tree.compute_and_plot_mi_tree``
@@ -43,7 +44,9 @@ class Morph_Tree(KDEBase):
             raise ValueError("data must be a 2D array-like object with shape (n_samples, n_params)")
 
         n_samples, n_params = data.shape
-        print(f"Morph_Tree initialized with {n_params} dimensional data shape.")
+        self.verbose = verbose
+        if self.verbose:
+            print(f"Morph_Tree initialized with {n_params} dimensional data shape.")
 
         if param_names is None:
             param_names = [f"param_{i}" for i in range(n_params)]
@@ -149,7 +152,7 @@ class Morph_Tree(KDEBase):
 
         return logpdf
 
-    def resample(self, n_resamples, nwalkers=None, progress=True):
+    def resample(self, n_resamples, nwalkers=None, progress: Optional[bool] = None):
         """
         Resamples from the approximated multivariate distribution using emcee.
         The number of walkers and thinning are adapted to generate n_resamples.
@@ -157,7 +160,7 @@ class Morph_Tree(KDEBase):
         Args:
             n_resamples (int): The desired number of resamples.
             nwalkers (int, optional): The number of walkers. Defaults to 2 * ndim.
-            progress (bool, optional): Whether to display a progress bar. Defaults to False.
+            progress (bool, optional): Whether to display a progress bar. Defaults to ``self.verbose``.
 
         Returns:
             np.ndarray: An array of resampled points with shape (n_resamples, n_dims).
@@ -181,6 +184,9 @@ class Morph_Tree(KDEBase):
         burn_in = int(0.3 * n_steps)
         
         initial_state = self._initial_resample(nwalkers).T
+
+        if progress is None:
+            progress = self.verbose
 
         sampler = emcee.EnsembleSampler(nwalkers, ndim, self.logpdf)
         sampler.run_mcmc(initial_state, n_steps, progress=progress)
@@ -207,7 +213,8 @@ class Morph_Tree(KDEBase):
             raise ValueError("No independent samples were generated. The MCMC chain may be too short or the autocorrelation time is severely underestimated.")
         
         if thinned_samples.shape[0] < n_resamples:
-            print(f"Warning: Not enough independent samples generated ({thinned_samples.shape[0]}/{n_resamples}). The autocorrelation time may be underestimated. Sampling with replacement to get {n_resamples} samples.")
+            if self.verbose:
+                print(f"Warning: Not enough independent samples generated ({thinned_samples.shape[0]}/{n_resamples}). The autocorrelation time may be underestimated. Sampling with replacement to get {n_resamples} samples.")
             return thinned_samples[np.random.choice(thinned_samples.shape[0], n_resamples, replace=True)]
 
         return thinned_samples[np.random.choice(thinned_samples.shape[0], n_resamples, replace=False)]

@@ -200,6 +200,7 @@ def plot_chow_liu_tree(
     labels: Sequence[str],
     outfile: str = "chow_liu_tree.png",
     root: int = 0,
+    verbose: bool = True,
 ) -> None:
     """
     Draw the Chow–Liu tree using a spring layout for better aesthetics.
@@ -220,7 +221,8 @@ def plot_chow_liu_tree(
         # Use graphviz for a hierarchical layout that avoids overlaps
         pos = nx.nx_agraph.graphviz_layout(tree, prog='dot')
     except ImportError:
-        print("PyGraphviz not found, falling back to spring_layout. For a better layout, please install pygraphviz.")
+        if verbose:
+            print("PyGraphviz not found, falling back to spring_layout. For a better layout, please install pygraphviz.")
         pos = nx.spring_layout(tree, seed=42) # spring layout for equal branches
 
 
@@ -283,6 +285,7 @@ def compute_and_plot_mi_tree(
     root: int = 0,
     out_path: Optional[str] = None,
     morph_type: Optional[str] = None,
+    verbose: bool = True,
 ) -> Tuple[np.ndarray, nx.Graph, List[Tuple[str, str]]]:
     """
     Compute MI, visualise, and return tree plus *(parent, child)* edge list.
@@ -302,6 +305,7 @@ def compute_and_plot_mi_tree(
             are saved. ``chow_liu_tree.png`` and ``tree.json`` are saved only
             when ``morph_type == 'tree'``. When ``None`` (backward compatible),
             tree artifacts are saved.
+        verbose (bool, optional): When True, print artifact summaries and rankings.
 
     Returns:
         Tuple[np.ndarray, nx.Graph, List[Tuple[str, str]]]: The MI matrix, the
@@ -349,7 +353,7 @@ def compute_and_plot_mi_tree(
     mst = nx.maximum_spanning_tree(complete, weight="weight")
     # Save the tree image only when requested (morph_type == 'tree')
     if save_tree_artifacts and out_path:
-        plot_chow_liu_tree(mst, labels, outfile=tree_path, root=root)
+        plot_chow_liu_tree(mst, labels, outfile=tree_path, root=root, verbose=verbose)
 
     dep_edges = extract_dependency_edges(mst, labels, root=root)
 
@@ -361,22 +365,25 @@ def compute_and_plot_mi_tree(
     if save_tree_artifacts and json_path:
         with open(json_path, "w", encoding="utf8") as fp:
             json.dump(dep_edges, fp, indent=2, default=str)
-        print(f"\nDependency list saved to {json_path}")
+        if verbose:
+            print(f"\nDependency list saved to {json_path}")
 
     # Top‑10 MI pairs for reference
     tri = np.triu_indices_from(mi, k=1)
     all_pairs = sorted(zip(tri[0], tri[1], mi[tri]), key=lambda x: x[2], reverse=True)
     top10 = all_pairs[:10]
-    print("\nTop 10 MI pairs:")
-    for i, j, val in top10:
-        print(f"  {labels[i]} — {labels[j]} : {val:.6f}")
+    if verbose:
+        print("\nTop 10 MI pairs:")
+        for i, j, val in top10:
+            print(f"  {labels[i]} — {labels[j]} : {val:.6f}")
 
     if out_path:
         mi_path = Path(out_path) / "params_MI.json"
         mi_data = [[labels[i], labels[j], val] for i, j, val in all_pairs]
         with open(mi_path, "w", encoding="utf8") as f:
             json.dump(mi_data, f, indent=2)
-        print(f"All MI pairs saved to {mi_path}")
+        if verbose:
+            print(f"All MI pairs saved to {mi_path}")
 
 
     return mi, mst, dep_edges

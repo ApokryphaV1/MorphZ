@@ -434,6 +434,7 @@ def compute_and_save_bandwidths(
     n_order: int,
     in_path: str | None = None,
     group_format: Literal["pairs", "groups"] = "pairs",
+    verbose: bool = True,
     
 ) -> list[list[Union[str, float]]]:
     """
@@ -444,6 +445,9 @@ def compute_and_save_bandwidths(
     that can be passed to `gaussian_kde.set_bandwidth(factor)` for subsequent
     evaluations. For diagonal/group-per-dimension exact control consider
     returning per-dim h_j and applying them with a custom KDE wrapper.
+
+    Args:
+        verbose (bool): When True, print a short summary once the JSON is written.
     """
     X = _to_2d(data)
     n_samples, n_features = X.shape
@@ -570,9 +574,10 @@ def compute_and_save_bandwidths(
     with open(output_filename, "w", encoding="utf-8") as f:
         json.dump(simplified_output, f, indent=4)
 
-    print(f"Bandwidths saved to {output_filename}")
-    if in_path is not None:
-        print(f"Processed {len(selected_groups)} groups and {len(singles)} single parameters")
+    if verbose:
+        print(f"Bandwidths saved to {output_filename}")
+        if in_path is not None:
+            print(f"Processed {len(selected_groups)} groups and {len(singles)} single parameters")
 
     return simplified_output
 

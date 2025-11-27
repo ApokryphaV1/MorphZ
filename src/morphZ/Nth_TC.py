@@ -81,6 +81,7 @@ def compute_total_correlation(
     loo: bool = True,
     seed: int = 0,
     eps: float = 1e-300,
+    verbose: bool = True,
 ) -> np.ndarray | list[tuple[tuple[int, ...], float]]:
     """
     Compute a symmetric matrix of pairwise mutual informations (n_order=2)
@@ -93,6 +94,7 @@ def compute_total_correlation(
         loo (bool, optional): If True, use leave-one-out correction. Defaults to True.
         seed (int, optional): Random seed. Defaults to 0.
         eps (float, optional): Small value to clip PDF values to avoid log(0). Defaults to 1e-300.
+        verbose (bool, optional): When True, print combinatorial counts for n_order>2.
 
     Returns:
         np.ndarray | list: For n_order=2, a symmetric matrix of pairwise MIs.
@@ -136,7 +138,8 @@ def compute_total_correlation(
             tc_value = float(np.mean(log_p_joint - log_p_marginals_sum))
             results.append((indices, max(0.0, tc_value)))
             n_combin += 1
-        print(f"The number of estimated Total correlations: {n_combin}")
+        if verbose:
+            print(f"The number of estimated Total correlations: {n_combin}")
         return results
 
 
@@ -204,6 +207,7 @@ def compute_and_save_tc(
     loo: bool = True,
     seed: int = 0,
     out_path: Optional[str] = None,
+    verbose: bool = True,
 ) -> np.ndarray | list:
     """
     Compute TC, visualise (for n=2), and save all TC values.
@@ -216,6 +220,7 @@ def compute_and_save_tc(
         loo (bool, optional): If True, use leave-one-out correction. Defaults to True.
         seed (int, optional): Random seed. Defaults to 0.
         out_path (Optional[str], optional): The output directory path. Defaults to None.
+        verbose (bool, optional): When True, print rankings and saved-path summaries.
 
     Returns:
         np.ndarray | list: The total correlation results.
@@ -230,7 +235,7 @@ def compute_and_save_tc(
         raise ValueError("Length of `names` must match number of dimensions.")
 
     results = compute_total_correlation(
-        samples, n_order=n_order, bw_method=bw_method, loo=loo, seed=seed
+        samples, n_order=n_order, bw_method=bw_method, loo=loo, seed=seed, verbose=verbose
     )
     
     if out_path:
@@ -247,23 +252,26 @@ def compute_and_save_tc(
         tri = np.triu_indices_from(mi_matrix, k=1)
         all_pairs = sorted(zip(tri[0], tri[1], mi_matrix[tri]), key=lambda x: x[2], reverse=True)
         
-        print("\nTop 10 MI pairs:")
-        for i, j, val in all_pairs[:10]:
-            print(f"  {labels[i]} — {labels[j]} : {val:.6f}")
+        if verbose:
+            print("\nTop 10 MI pairs:")
+            for i, j, val in all_pairs[:10]:
+                print(f"  {labels[i]} — {labels[j]} : {val:.6f}")
 
         mi_path = p / f"params_{n_order}-order_TC.json"
         mi_data = [[labels[i], labels[j], val] for i, j, val in all_pairs]
         with open(mi_path, "w", encoding="utf8") as f:
             json.dump(mi_data, f, indent=2)
-        print(f"All MI pairs saved to {mi_path}")
+        if verbose:
+            print(f"All MI pairs saved to {mi_path}")
     else:
         # Sort results for n > 2
         sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
         
-        print(f"\nTop 10 {n_order}-order Total Correlation groups:")
-        for indices, val in sorted_results[:10]:
-            group_labels = [labels[i] for i in indices]
-            print(f"  {', '.join(group_labels)} : {val:.6f}")
+        if verbose:
+            print(f"\nTop 10 {n_order}-order Total Correlation groups:")
+            for indices, val in sorted_results[:10]:
+                group_labels = [labels[i] for i in indices]
+                print(f"  {', '.join(group_labels)} : {val:.6f}")
 
         tc_path = p / f"params_{n_order}-order_TC.json"
         tc_data = [
@@ -271,6 +279,7 @@ def compute_and_save_tc(
         ]
         with open(tc_path, "w", encoding="utf8") as f:
             json.dump(tc_data, f, indent=2)
-        print(f"All {n_order}-order TC values saved to {tc_path}")
+        if verbose:
+            print(f"All {n_order}-order TC values saved to {tc_path}")
 
     return results

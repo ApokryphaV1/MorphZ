@@ -12,6 +12,7 @@ def bridge_sampling_ln(
     samples_prop,
     tol=1e-4,
     max_iter=40000,
+    verbose: bool = True,
 ):
     """
     Estimate log marginal likelihood log p(y) using bridge sampling in log space.
@@ -31,6 +32,7 @@ def bridge_sampling_ln(
         tol (float): Convergence tolerance on successive log‑evidence updates.
             Smaller values increase accuracy but may require more iterations.
         max_iter (int): Maximum number of bridge iterations.
+        verbose (bool): When True, print progress, warnings, and convergence info.
 
     Returns:
         list[float, float]: ``[log_evidence, rmse_estimate]`` where the second
@@ -63,15 +65,17 @@ def bridge_sampling_ln(
             failure_count += 1
             continue
         finally:
-            # Ensure progress is always updated
-            print(f"\rEvaluating target distribution: {i+1}/{num_samples}", end="")
+            if verbose:
+                # Ensure progress is always updated
+                print(f"\rEvaluating target distribution: {i+1}/{num_samples}", end="")
 
     # Rebuild arrays from the lists of successful evaluations
     samples_prop = np.array(successful_samples)
     log_f_prop = np.array(log_f_prop_results)
-    print()
+    if verbose:
+        print()
 
-    if failure_count > 0:
+    if failure_count > 0 and verbose:
         print(
             f"\nWarning: Evaluation of target distribution failed for {failure_count} samples, which were skipped."
         )
@@ -81,9 +85,10 @@ def bridge_sampling_ln(
 
     samples_prop = samples_prop[finite_mask]
     log_f_prop = log_f_prop[finite_mask]
-    print(
-        f"Filtered proposal samples: {len(samples_prop)} valid samples out of {num_samples} total samples."
-    )
+    if verbose:
+        print(
+            f"Filtered proposal samples: {len(samples_prop)} valid samples out of {num_samples} total samples."
+        )
     # Now compute log_g for the filtered samples. g expects (n_dims, n_samples)
     log_g_prop = g(samples_prop.T)
 
@@ -91,9 +96,10 @@ def bridge_sampling_ln(
     N2 = len(log_f_prop)
 
     if N2 == 0:
-        print(
-            "\nWarning: No valid samples from the proposal distribution. Bridge sampling failed."
-        )
+        if verbose:
+            print(
+                "\nWarning: No valid samples from the proposal distribution. Bridge sampling failed."
+            )
         return [np.nan, np.nan]
 
     s1 = N1 / (N1 + N2)
@@ -119,10 +125,11 @@ def bridge_sampling_ln(
         log_den = -np.log(N1) + utils.log_sum(log_terms_post)
 
         log_p_new = log_num - log_den
-        print(
-            f"\r iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}",
-            end="",
-        )
+        if verbose:
+            print(
+                f"\r iteration: {t+1} log(z) old: {log_p_old} log(z) New: {log_p_new}",
+                end="",
+            )
         # Check convergence:
         if np.abs(log_p_new - log_p_old) < tol:
             log_p_final = np.max([log_p_new, log_p_old])
@@ -139,10 +146,11 @@ def bridge_sampling_ln(
                 s1,
                 s2,
             )
-            print(
-                f"\r\nConverged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}",
-                end="",
-            )
+            if verbose:
+                print(
+                    f"\r\nConverged in {t+1} iterations. log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}",
+                    end="",
+                )
             return [log_p_final, rmse_est]
 
         log_p_old = log_p_new
@@ -161,8 +169,9 @@ def bridge_sampling_ln(
         s1,
         s2,
     )
-    print(f"\nConvergence not reached within {max_iter} iterations.")
-    print(f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}")
+    if verbose:
+        print(f"\nConvergence not reached within {max_iter} iterations.")
+        print(f"Final log(z): {log_p_final:.4f} +/-: {rmse_est:.4f}")
 
     return [log_p_final, rmse_est]
 
@@ -246,4 +255,3 @@ def compute_bridge_rmse(
     re2 = term1 + term2
 
     return np.sqrt(re2)
-
